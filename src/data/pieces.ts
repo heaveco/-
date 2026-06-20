@@ -75,4 +75,12 @@ export const PIECE_DEFINITIONS: Record<string, PieceDefinition> = {
     ]
   },
   loser: { id: 'loser', name: '敗北者', moveRules: [{ generator: 'relative', params: [{ dx: -1, dy: -1 }, { dx: 0, dy: -1 }, { dx: 1, dy: -1 }, { dx: -1, dy: 0 }, { dx: 1, dy: 0 }, { dx: 0, dy: 1 }] }] },
+  white_sage: {
+    id: 'white_sage',
+    name: '白賢',
+    tags: ['swap_ability'],
+    defaultComponents: { isExhausted: false },
+    // 全ての斜めに1マス。成りはなし。
+    moveRules: [{ generator: 'relative', params: [{ dx: -1, dy: -1 }, { dx: 1, dy: -1 }, { dx: -1, dy: 1 }, { dx: 1, dy: 1 }] }]
+  }
 };

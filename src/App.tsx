@@ -11,10 +11,10 @@ function App() {
     phase, pieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, movablePositions, 
     handleCellClick, handleCapturedClick, pendingPromotion, winner, resetGame,
     chohanState, rouletteState, turnState, turnSkipState, wolfDeclaration, accuseState, turnCount, mustDropState, pendingBombActivation, bulletMinigameData,
-    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation,
+    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState,
     resolvePromotion, resolveWolfDeclaration, proceedAccusation, cancelAccusation, resolveAccusation, closeAccusationResult, 
     playChohan, resolveChohan, startRoulette, resolveRoulette, resolveBombActivation, resolveBullet,
-    startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation
+    startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation, resolveSwapAbility
   } = useGameEngine();
 
   const [rotationAngle, setRotationAngle] = useState(0);
@@ -76,6 +76,7 @@ function App() {
   else if (phase === 'trap_placement_p2') statusText = '【地雷配置】Player 2 (赤) : 自陣から3列以内の空きマスに配置してください';
   else if (phase === 'renda_quota_p1') statusText = '【連打妨害】Player 1 (青) : 相手の連打ノルマを決めてください！';
   else if (phase === 'renda_quota_p2') statusText = '【連打妨害】Player 2 (赤) : 相手の連打ノルマを決めてください！';
+  else if (swapAbilityState?.step === 'selecting_target') statusText = '【能力】入れ替える自陣の駒を選択してください';
   else statusText = `Turn ${turnCount}: ${currentPlayer === 'player1' ? 'Player 1 (青)' : 'Player 2 (赤)'}`;
 
   const activeQueue = phase === 'placement_p1' ? p1Queue : phase === 'placement_p2' ? p2Queue : phase === 'trap_placement_p1' ? p1TrapQueue : phase === 'trap_placement_p2' ? p2TrapQueue : [];
@@ -97,8 +98,9 @@ function App() {
           <p className="font-bold mb-1">⚠️ 二次創作に関するガイドラインへの配慮</p>
           <p>本ゲームは、オモコロチャンネル様の動画企画「将棋の新弾」を元にした、ファンによる非公式の二次創作（開発途中版）です。公式（株式会社バーグハンバーグバーグ様）とは一切関係ありません。完全非営利で運営されており、権利所有者様からの取り下げ要請があった場合は速やかに公開を停止します。</p>
           <p>"双子"のコマ二種につきましては、@MADOguchimoto様の投稿https://x.gd/fzSC4が本家になります。</p>
+          <p>"白の賢人"につきましては、同投稿者様の投稿https://x.gd/srSvcが本家になります。</p>
         </div>
-        <div className={`inline-block px-6 py-2 rounded-full font-bold shadow-lg mb-2 ${winner ? 'bg-yellow-500' : phase === 'playing' ? (currentPlayer === 'player1' ? 'bg-blue-600' : 'bg-red-600') : 'bg-gray-600'}`}>{statusText}</div>
+        <div className={`inline-block px-6 py-2 rounded-full font-bold shadow-lg mb-2 ${winner ? 'bg-yellow-500' : swapAbilityState ? 'bg-indigo-600' : phase === 'playing' ? (currentPlayer === 'player1' ? 'bg-blue-600' : 'bg-red-600') : 'bg-gray-600'}`}>{statusText}</div>
         {mustDropState && <div className="text-red-400 font-bold animate-bounce mt-2">⚠️ 迷惑をかけられています！指定の駒を必ず手持ちから出してください！</div>}
         {turnSkipState[currentPlayer === 'player1' ? 'player2' : 'player1'] && <div className="text-yellow-400 font-bold mb-2 animate-pulse">※相手はペナルティで1回休みです！</div>}
         {phase.startsWith('placement') || phase.startsWith('trap_placement') ? (
@@ -145,7 +147,36 @@ function App() {
         </div>
       </div>
 
-      {/* --- ★新規：味方の地雷通過・配置確認ダイアログ --- */}
+      {/* --- ★新規：白賢の入れ替え能力ダイアログ --- */}
+      {swapAbilityState?.step === 'ask' && (
+        <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
+          <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-2 border-white max-w-md w-full">
+            <h2 className="text-3xl font-bold mb-4 text-white">白の賢人</h2>
+            <p className="mb-6 text-gray-300 text-lg">自陣の駒と位置を入れ替える能力を使いますか？</p>
+            <div className="flex gap-4 justify-center">
+              <button onClick={() => resolveSwapAbility('yes')} className="px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded font-bold text-lg">はい（能力を使う）</button>
+              <button onClick={() => resolveSwapAbility('no')} className="px-6 py-3 bg-gray-600 hover:bg-gray-500 rounded font-bold text-lg">いいえ（通常移動）</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {swapAbilityState?.step === 'confirm' && (
+        <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
+          <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-2 border-white max-w-md w-full">
+            <h2 className="text-3xl font-bold mb-4 text-white">入れ替え確認</h2>
+            <p className="mb-6 text-gray-300 text-lg">
+              「{PIECE_DEFINITIONS[pieces.find(p => p.id === swapAbilityState.targetPieceId)?.definitionId || '']?.name}」と本当に入れ替えますか？<br/>
+              <span className="text-sm text-gray-400 mt-2 block">入れ替え後、白の賢人は行動不能になります。</span>
+            </p>
+            <div className="flex gap-4 justify-center">
+              <button onClick={() => resolveSwapAbility('confirm_yes')} className="px-6 py-3 bg-red-600 hover:bg-red-500 rounded font-bold text-lg">はい</button>
+              <button onClick={() => resolveSwapAbility('confirm_no')} className="px-6 py-3 bg-gray-600 hover:bg-gray-500 rounded font-bold text-lg">やめる</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {phase === 'mine_confirm' && pendingMineConfirmation && (
         <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
           <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-2 border-yellow-500 max-w-md w-full">
@@ -159,7 +190,6 @@ function App() {
         </div>
       )}
 
-      {/* --- ★復活：運命のルーレットダイアログ --- */}
       {phase === 'minigame_roulette' && (
         <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
           <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-2 border-purple-500 max-w-md w-full">

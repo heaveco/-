@@ -12,7 +12,7 @@ const INITIAL_KINGS: Piece[] = [
   { id: 'p2_king', definitionId: 'king', owner: 'player2', position: { x: 2, y: 0 }, components: {} },
 ];
 
-const PIECE_POOL = ['pawn', 'silver', 'gold', 'lance', 'rook', 'bishop', 'knight', 'troll', 'trickster', 'wolf', 'hero', 'nuisance', 'bomb', 'landmine', 'bullet', 'drunk', 'renda', 'twins', 'twin_assassin']; 
+const PIECE_POOL = ['pawn', 'silver', 'gold', 'lance', 'rook', 'bishop', 'knight', 'troll', 'trickster', 'wolf', 'hero', 'nuisance', 'bomb', 'landmine', 'bullet', 'drunk', 'renda', 'twins', 'twin_assassin', 'white_sage']; 
 const DEMOTE_MAP: Record<string, string> = { 'tokin': 'pawn', 'promoted_silver': 'silver', 'promoted_lance': 'lance', 'promoted_rook': 'rook', 'promoted_bishop': 'bishop', 'promoted_knight': 'knight', 'promoted_trickster': 'trickster', 'promoted_drunk': 'drunk' };
 
 export const WOLF_ROLES = ['pawn', 'silver', 'gold', 'lance', 'knight', 'rook', 'bishop'];
@@ -91,12 +91,31 @@ export const useGameEngine = () => {
   const [wolfDeclaration, setWolfDeclaration] = useState<any>(null);
   const [accuseState, setAccuseState] = useState<any>(null);
 
+  // ★新規：白賢の入れ替え能力ステート
+  const [swapAbilityState, setSwapAbilityState] = useState<{ pieceId: string; step: 'ask' | 'selecting_target' | 'confirm'; targetPieceId?: string } | null>(null);
+
   const selectedBoardPiece = pieces.find(p => p.id === selectedPieceId);
   const selectedCapturedPiece = capturedPieces.find(p => p.id === selectedPieceId);
 
   let movablePositions: Position[] = [];
   if (phase === 'playing' && !pendingPromotion && !winner && !accuseState && !wolfDeclaration && !pendingBombActivation) {
-    if (selectedBoardPiece) {
+    if (swapAbilityState?.step === 'selecting_target') {
+      // ★入れ替えターゲットの抽出（自陣の1x1駒）
+      movablePositions = [];
+      const isP1 = currentPlayer === 'player1';
+      pieces.forEach(p => {
+        if (p.id === swapAbilityState.pieceId) return;
+        const def = getEffectiveDefinition(p);
+        const w = def?.size?.width || 1;
+        const h = def?.size?.height || 1;
+        if (w > 1 || h > 1) return; // 巨大駒は不可
+        
+        const inOwnZone = isP1 ? (p.position.y >= 2) : (p.position.y <= 2);
+        if (inOwnZone) {
+          movablePositions.push(p.position);
+        }
+      });
+    } else if (selectedBoardPiece) {
       movablePositions = calculateMovablePositions(selectedBoardPiece, pieces, turnCount);
     } else if (selectedCapturedPiece) {
       const def = getEffectiveDefinition(selectedCapturedPiece);
@@ -123,22 +142,15 @@ export const useGameEngine = () => {
     let nextBoard = [...currentBoard];
     let newWinner: VictoryResult | null = null;
     
-    // ★修正：回復双子の休眠タイマー制御
     nextBoard = nextBoard.map(p => {
       if (p.definitionId === 'twins' && p.owner === nextPlayer && p.components?.hp === 1) {
-        if ((p.components.recoveryTimer || 0) > 0) {
-          // 攻撃された直後のターン：タイマーを0に減らし、HPは1のまま（行動不能維持）
-          return { ...p, components: { ...p.components, recoveryTimer: p.components.recoveryTimer - 1 } };
-        } else {
-          // タイマーが0になっている（1度も追加攻撃を受けずに次の自分のターンを迎えた）場合全回復
-          return { ...p, components: { ...p.components, hp: 2 } };
-        }
+        if ((p.components.recoveryTimer || 0) > 0) return { ...p, components: { ...p.components, recoveryTimer: p.components.recoveryTimer - 1 } };
+        else return { ...p, components: { ...p.components, hp: 2 } };
       }
       return p;
     });
 
     const explodingBombs = nextBoard.filter(p => p.owner === nextPlayer && p.definitionId === 'bomb' && p.components?.isActivated && (p.components.bombTimer || 0) <= 1);
-    
     nextBoard = nextBoard.map(p => {
       if (p.owner === nextPlayer && p.definitionId === 'bomb' && p.components?.isActivated) {
         return { ...p, components: { ...p.components, bombTimer: p.components.bombTimer - 1 } };
@@ -315,6 +327,7 @@ export const useGameEngine = () => {
               if (captured.definitionId === 'wolf') delete captured.components.mimicRole;
               if (captured.definitionId === 'nuisance') captured.definitionId = 'harm';
               if (captured.definitionId === 'bomb') { captured.components.isActivated = false; captured.components.bombTimer = 0; }
+              if (captured.definitionId === 'white_sage') captured.components.isExhausted = false;
               
               const capDef = captured.definitionId;
               const originalDefId = DEMOTE_MAP[capDef] || capDef;
@@ -391,7 +404,8 @@ export const useGameEngine = () => {
   };
 
   const handleCellClick = (x: number, y: number) => {
-    if (wolfDeclaration || accuseState || pendingPromotion || winner || pendingBombActivation || pendingMineConfirmation) return;
+    if (wolfDeclaration || accuseState || pendingPromotion || winner || pendingBombActivation || pendingMineConfirmation || swapAbilityState?.step === 'ask' || swapAbilityState?.step === 'confirm') return;
+
     if (phase.startsWith('placement') || phase.startsWith('trap_placement')) {
       const activePlayer = phase.includes('p1') ? 'player1' : 'player2';
       const isTrapPhase = phase.startsWith('trap');
@@ -425,6 +439,27 @@ export const useGameEngine = () => {
       return;
     }
 
+    // ★新規：白賢のターゲット選択中のクリック
+    if (swapAbilityState?.step === 'selecting_target') {
+      const clickedPiece = pieces.find(p => getOccupiedPositions(p).some(pos => pos.x === x && pos.y === y));
+      if (clickedPiece && clickedPiece.id !== swapAbilityState.pieceId) {
+        const def = getEffectiveDefinition(clickedPiece);
+        const w = def?.size?.width || 1;
+        const h = def?.size?.height || 1;
+        if (w > 1 || h > 1) return; // 巨大駒は不可
+        
+        const isP1 = currentPlayer === 'player1';
+        const inOwnZone = isP1 ? (clickedPiece.position.y >= 2) : (clickedPiece.position.y <= 2);
+        if (inOwnZone) {
+          setSwapAbilityState({ ...swapAbilityState, step: 'confirm', targetPieceId: clickedPiece.id });
+        }
+      } else {
+        setSwapAbilityState(null);
+        setSelectedPieceId(null);
+      }
+      return; 
+    }
+
     let chosenAnchor: Position | null = null;
     const activePiece = selectedBoardPiece || selectedCapturedPiece;
     if (activePiece) {
@@ -436,9 +471,7 @@ export const useGameEngine = () => {
     if (chosenAnchor && activePiece) {
       const activeDef = getEffectiveDefinition(activePiece);
       if (activePiece.definitionId === 'wolf' && !!selectedCapturedPiece) { setWolfDeclaration({ source: 'hand', owner: currentPlayer, x: chosenAnchor.x, y: chosenAnchor.y, pieceId: activePiece.id }); return; }
-      
       if (activeDef?.tags?.includes('requires_gamble') && !turnState.isSecondMove) { setPendingAction({ pieceId: activePiece.id, to: chosenAnchor, isDrop: !!selectedCapturedPiece }); setChohanState(null); setPhase('minigame_chohan'); return; }
-      
       if (activeDef?.tags?.includes('renda_minigame')) {
         const dist = !!selectedCapturedPiece ? 1 : Math.max(Math.abs(chosenAnchor.x - activePiece.position.x), Math.abs(chosenAnchor.y - activePiece.position.y));
         const req = dist * (rendaQuotas[currentPlayer] + (activePiece.components.useCount || 0));
@@ -447,7 +480,6 @@ export const useGameEngine = () => {
         setPhase('minigame_renda_play');
         return;
       }
-
       executeMove(activePiece.id, chosenAnchor, !!selectedCapturedPiece);
       return; 
     }
@@ -462,8 +494,17 @@ export const useGameEngine = () => {
       if (mustDropState?.playerId === currentPlayer) return;
       if (turnState.isSecondMove && clickedPiece.id !== selectedPieceId) return;
       setSelectedPieceId(clickedPiece.id);
+
+      // ★新規：白の賢人をクリックしたら入れ替え能力のダイアログを開く
+      const def = getEffectiveDefinition(clickedPiece);
+      if (def?.id === 'white_sage' && !clickedPiece.components?.isExhausted) {
+        setSwapAbilityState({ pieceId: clickedPiece.id, step: 'ask' });
+      } else {
+        setSwapAbilityState(null);
+      }
     } else {
       if (!turnState.isSecondMove) setSelectedPieceId(null);
+      setSwapAbilityState(null);
     }
   };
 
@@ -476,7 +517,6 @@ export const useGameEngine = () => {
     enemies.forEach(enemy => {
       const hitW = Math.floor(Math.random() * 18) + 18; 
       const missW = (360 / enemies.length) - hitW;
-      
       absoluteTargets.push({ label: PIECE_DEFINITIONS[enemy.definitionId]?.name || '?', pieceId: enemy.id, startAngle: cAngle, endAngle: cAngle + hitW, color: '#ef4444' });
       cAngle += hitW;
       absoluteTargets.push({ label: 'ハズレ', pieceId: null, startAngle: cAngle, endAngle: cAngle + missW, color: '#9ca3af' });
@@ -484,33 +524,59 @@ export const useGameEngine = () => {
     });
     if (absoluteTargets.length > 0) absoluteTargets[absoluteTargets.length - 1].endAngle = 360;
 
-    setBulletMinigameData({
-      targets: absoluteTargets,
-      speed: Math.floor(Math.random() * 400) + 300, 
-      initialOffset: Math.random() * 360
-    });
+    setBulletMinigameData({ targets: absoluteTargets, speed: Math.floor(Math.random() * 400) + 300, initialOffset: Math.random() * 360 });
     setPhase('minigame_bullet');
   };
 
   const handleCapturedClick = (pieceId: string) => {
-    if (phase !== 'playing' || pendingPromotion || winner || turnState.isSecondMove || wolfDeclaration || accuseState || pendingBombActivation || pendingMineConfirmation) return;
+    if (phase !== 'playing' || pendingPromotion || winner || turnState.isSecondMove || wolfDeclaration || accuseState || pendingBombActivation || pendingMineConfirmation || swapAbilityState?.step === 'ask' || swapAbilityState?.step === 'confirm') return;
     if (mustDropState?.playerId === currentPlayer && pieceId !== mustDropState.pieceId) return;
 
     const target = capturedPieces.find(p => p.id === pieceId);
     if (target && target.owner === currentPlayer) {
       if (PIECE_DEFINITIONS[target.definitionId]?.tags?.includes('bullet_minigame')) { startBulletMinigame(pieceId); return; }
       setSelectedPieceId(pieceId);
+      setSwapAbilityState(null);
+    }
+  };
+
+  // ★新規：白賢の入れ替え能力ダイアログ解決
+  const resolveSwapAbility = (answer: string) => {
+    if (!swapAbilityState) return;
+    if (swapAbilityState.step === 'ask') {
+      if (answer === 'yes') {
+        setSwapAbilityState({ ...swapAbilityState, step: 'selecting_target' });
+      } else {
+        setSwapAbilityState(null);
+      }
+    } else if (swapAbilityState.step === 'confirm') {
+      if (answer === 'confirm_yes') {
+        const sage = pieces.find(p => p.id === swapAbilityState.pieceId);
+        const target = pieces.find(p => p.id === swapAbilityState.targetPieceId);
+        if (sage && target) {
+          const sagePos = { ...sage.position };
+          const targetPos = { ...target.position };
+          
+          let nextPieces = pieces.map(p => {
+            if (p.id === sage.id) return { ...p, position: targetPos, components: { ...p.components, isExhausted: true } };
+            if (p.id === target.id) return { ...p, position: sagePos };
+            return p;
+          });
+          
+          endCurrentTurn(nextPieces);
+          setSelectedPieceId(null);
+        }
+        setSwapAbilityState(null);
+      } else {
+        setSwapAbilityState({ ...swapAbilityState, step: 'selecting_target' });
+      }
     }
   };
 
   const resolveMineConfirmation = (proceed: boolean) => {
     if (!pendingMineConfirmation) return;
-    if (proceed) {
-      executeMove(...(pendingMineConfirmation.args as any));
-    } else {
-      setPhase('playing');
-      setSelectedPieceId(null);
-    }
+    if (proceed) { executeMove(...(pendingMineConfirmation.args as any)); } 
+    else { setPhase('playing'); setSelectedPieceId(null); }
     setPendingMineConfirmation(null);
   };
 
@@ -624,7 +690,7 @@ export const useGameEngine = () => {
 
   const resetGame = () => {
     const s = initGame(); setPieces(INITIAL_KINGS); setCapturedPieces(s.cap); setP1Queue(s.p1Q); setP2Queue(s.p2Q); setP1TrapQueue(s.p1TrapQ); setP2TrapQueue(s.p2TrapQ);
-    setPhase(s.initialPhase as any); setCurrentPlayer('player1'); setSelectedPieceId(null); setWinner(null); setPendingPromotion(null); setTurnState({ hasDoubledUp: false, isSecondMove: false }); setTurnSkipState({ player1: false, player2: false }); setTurnCount(1); setMustDropState(null); setBulletMinigameData(null); setPendingMineConfirmation(null);
+    setPhase(s.initialPhase as any); setCurrentPlayer('player1'); setSelectedPieceId(null); setWinner(null); setPendingPromotion(null); setTurnState({ hasDoubledUp: false, isSecondMove: false }); setTurnSkipState({ player1: false, player2: false }); setTurnCount(1); setMustDropState(null); setBulletMinigameData(null); setPendingMineConfirmation(null); setSwapAbilityState(null);
   };
 
   const visiblePieces = pieces.filter(p => phase === 'placement_p1' ? p.owner === 'player1' : phase === 'placement_p2' ? p.owner === 'player2' : true);
@@ -632,9 +698,9 @@ export const useGameEngine = () => {
   return {
     phase, pieces: visiblePieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, movablePositions, pendingPromotion, winner,
     chohanState, rouletteState, turnState, turnSkipState, wolfDeclaration, accuseState, WOLF_ROLES, turnCount, mustDropState, pendingBombActivation, bulletMinigameData,
-    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation,
+    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState,
     handleCellClick, handleCapturedClick, resolvePromotion, resolveWolfDeclaration, resetGame,
     proceedAccusation, cancelAccusation, resolveAccusation, closeAccusationResult, playChohan, resolveChohan, startRoulette, resolveRoulette, resolveBombActivation, resolveBullet,
-    startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation
+    startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation, resolveSwapAbility
   };
 };

@@ -28,7 +28,7 @@ export const resolveCombat = (
 
     nextBoard.push({
       id: `${target.owner}_gold_split_${Date.now()}_${Math.random()}`,
-      definitionId: 'loser',
+      definitionId: 'gold',
       owner: target.owner,
       position: { x: survivingX, y: target.position.y },
       components: {}
@@ -64,7 +64,6 @@ export const resolveCombat = (
       nextBoard = nextBoard.map(p => {
         if (p.id === target.id) {
           const newComps = { ...p.components, hp: newHp };
-          // ★修正：回復双子が被弾した場合、1ターン休みのタイマーをセット
           if (target.definitionId === 'twins') {
             newComps.recoveryTimer = 1;
           }
@@ -77,6 +76,7 @@ export const resolveCombat = (
       capturedPiece = { ...target, components: { ...target.components, hp: 2 } }; 
       if (capturedPiece.definitionId === 'wolf') delete capturedPiece.components.mimicRole;
       if (capturedPiece.definitionId === 'bomb') { capturedPiece.components.isActivated = false; capturedPiece.components.bombTimer = 0; }
+      if (capturedPiece.definitionId === 'white_sage') capturedPiece.components.isExhausted = false; // ★追加
     }
   } 
   else {
@@ -84,6 +84,7 @@ export const resolveCombat = (
     capturedPiece = { ...target, components: { ...target.components } };
     if (capturedPiece.definitionId === 'wolf') delete capturedPiece.components.mimicRole;
     if (capturedPiece.definitionId === 'bomb') { capturedPiece.components.isActivated = false; capturedPiece.components.bombTimer = 0; }
+    if (capturedPiece.definitionId === 'white_sage') capturedPiece.components.isExhausted = false; // ★追加
     if (capturedPiece.definitionId === 'nuisance') capturedPiece.definitionId = 'harm';
   }
 

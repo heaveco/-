@@ -84,9 +84,10 @@ export const calculateMovablePositions = (piece: Piece, board: Piece[], turnCoun
   const definition = getEffectiveDefinition(piece);
   if (!definition) return [];
   if (definition.tags?.includes('requires_turn_5') && turnCount < 5) return [];
-  
-  // ★新規：被弾した「回復双子」の移動不可判定
   if (definition.tags?.includes('immobilized_if_damaged') && (piece.components?.hp || 2) < 2) return [];
+  
+  // ★新規：白賢が能力使用後の場合は移動不可
+  if (definition.tags?.includes('swap_ability') && piece.components?.isExhausted) return [];
 
   const movablePositions: Position[] = [];
   const dir = getDirectionMultiplier(piece.owner);
