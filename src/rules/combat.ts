@@ -139,12 +139,20 @@ export const resolveCombat = (
     attackerFinalPos = clickedPos;
   }
 
-  // クリーンアップ
+// クリーンアップ
   if (capturedPiece) {
     if (capturedPiece.definitionId === 'wolf') delete capturedPiece.components.mimicRole;
     if (capturedPiece.definitionId === 'bomb') { capturedPiece.components.isActivated = false; capturedPiece.components.bombTimer = 0; }
     if (capturedPiece.definitionId === 'white_sage') capturedPiece.components.isExhausted = false;
     if (capturedPiece.definitionId === 'nuisance') capturedPiece.definitionId = 'harm';
+    
+    // ★修正：取得した駒の所有権（owner）を戦闘ルール側で完全に決定する
+    // 基本は「攻撃者（取った側）」の持ち駒になる
+    capturedPiece.owner = attacker.owner;
+    // ただし、攻撃者と元の持ち主が同じ（味方同士討ち）なら「相手」の持ち駒にするペナルティ
+    if (attacker.owner === actualTarget.owner) {
+      capturedPiece.owner = attacker.owner === 'player1' ? 'player2' : 'player1';
+    }
   }
 
   let newAttackerComponents = { ...attacker.components };

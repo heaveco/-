@@ -12,8 +12,8 @@ const INITIAL_KINGS: Piece[] = [
   { id: 'p2_king', definitionId: 'king', owner: 'player2', position: { x: 2, y: 0 }, components: {} },
 ];
 
-const PIECE_POOL = ['pawn', 'silver', 'gold', 'lance', 'rook', 'bishop', 'knight', 'troll', 'trickster', 'wolf', 'hero', 'nuisance', 'bomb', 'landmine', 'bullet', 'drunk', 'renda', 'twins', 'twin_assassin', 'white_sage', 'mushroom', 'shield', 'ghost']; 
-const DEMOTE_MAP: Record<string, string> = { 'tokin': 'pawn', 'promoted_silver': 'silver', 'promoted_lance': 'lance', 'promoted_rook': 'rook', 'promoted_bishop': 'bishop', 'promoted_knight': 'knight', 'promoted_trickster': 'trickster', 'promoted_drunk': 'drunk' };
+const PIECE_POOL = ['pawn', 'silver', 'gold', 'lance', 'rook', 'bishop', 'knight', 'troll', 'trickster', 'wolf', 'hero', 'nuisance', 'bomb', 'landmine', 'bullet', 'drunk', 'renda', 'twins', 'twin_assassin', 'white_sage', 'mushroom', 'shield', 'ghost', 'gamble_jumper', 'anti_promote']; 
+const DEMOTE_MAP: Record<string, string> = { 'tokin': 'pawn', 'promoted_silver': 'silver', 'promoted_lance': 'lance', 'promoted_rook': 'rook', 'promoted_bishop': 'bishop', 'promoted_knight': 'knight', 'promoted_trickster': 'trickster', 'promoted_drunk': 'drunk' , 'promoted_anti_promote': 'anti_promote' };
 
 export const WOLF_ROLES = ['pawn', 'silver', 'gold', 'lance', 'knight', 'rook', 'bishop'];
 
@@ -125,7 +125,6 @@ export const useGameEngine = () => {
           const area = getOccupiedPositions(hypo);
           const isOverlap = pieces.some(p => {
             if (PIECE_DEFINITIONS[p.definitionId]?.tags?.includes('trap')) return false;
-            // ★修正：霊を持ち駒から出すとき、相手の駒の上に憑依ドロップできるようにする
             if (def?.tags?.includes('ghost_possession') && p.owner !== currentPlayer) return false;
             return getOccupiedPositions(p).some(ep => area.some(pos => pos.x === ep.x && pos.y === ep.y));
           });
@@ -211,7 +210,7 @@ export const useGameEngine = () => {
   const executeMove = (pieceId: string, to: Position, isDrop: boolean, skipTurnChange: boolean = false, wolfMimicRole?: string, newUseCount?: number, destroyedAllyMineIds?: string[]) => {
     let nextPieces = [...pieces];
     let lastActionData: any = null;
-    let promotionCanceled = false; // ★新規：手前ストップによる成りキャンセルフラグ
+    let promotionCanceled = false; 
     const activePiece = isDrop ? capturedPieces.find(p => p.id === pieceId) : pieces.find(p => p.id === pieceId);
     if (!activePiece) return;
 
@@ -251,7 +250,7 @@ export const useGameEngine = () => {
         return; 
       }
     } else {
-      nextPieces = nextPieces.filter(p => !destroyedAllyMineIds.includes(p.id));
+      //nextPieces = nextPieces.filter(p => !destroyedAllyMineIds.includes(p.id));//ここを有効にすると、地雷を踏むと同時に味方の地雷も消えることになる。仕様としては微妙なので、ここでは消さないことにする。
     }
 
     let finalTo = to;
@@ -296,10 +295,10 @@ export const useGameEngine = () => {
         lastActionData = { type: 'move' };
       }
     } else if (isDrop) {
-      // ★修正：ドロップ時に敵駒の上に置いた場合（霊の憑依処理など）
       let targetPiece = undefined;
       for (const p of nextPieces) {
-        if (p.owner !== currentPlayer) {
+        if (p.id === activePiece.id) continue; // ★追加：自分自身はターゲットにしない（自滅防止）
+        if (p.owner !== currentPlayer || activePiece.definitionId === 'gamble_jumper') {
           const targetArea = getOccupiedPositions(p);
           const myDestArea = getOccupiedPositions({ ...activePiece, position: finalTo });
           if (myDestArea.some(dp => targetArea.some(tp => tp.x === dp.x && tp.y === dp.y))) { targetPiece = p; break; }
@@ -313,7 +312,8 @@ export const useGameEngine = () => {
           const capDef = combatResult.capturedPiece.definitionId;
           const originalDefId = DEMOTE_MAP[capDef] || capDef;
           const newCapId = `cap_${Date.now()}_${Math.random()}`;
-          setCapturedPieces(prev => [...prev, { ...combatResult.capturedPiece!, owner: currentPlayer, definitionId: originalDefId, id: newCapId }]);
+          // ★修正：ownerを currentPlayer から combatResult...owner に変更し、戦闘結果を尊重する
+          setCapturedPieces(prev => [...prev, { ...combatResult.capturedPiece!, owner: combatResult.capturedPiece.owner, definitionId: originalDefId, id: newCapId }]);
           if (PIECE_DEFINITIONS[capDef]?.tags?.includes('force_drop_if_captured')) {
             setMustDropState({ playerId: currentPlayer, pieceId: newCapId }); skipTurnChange = false; 
           }
@@ -407,19 +407,23 @@ export const useGameEngine = () => {
     } else {
       let targetPiece = undefined;
       for (const p of nextPieces) {
-        if (p.owner !== currentPlayer) {
+        if (p.id === activePiece.id) continue; // ★追加：自分自身はターゲットにしない（自滅防止）
+        if (p.owner !== currentPlayer || activePiece.definitionId === 'gamble_jumper') {
           const targetArea = getOccupiedPositions(p);
           const myDestArea = getOccupiedPositions({ ...activePiece, position: finalTo });
           if (myDestArea.some(dp => targetArea.some(tp => tp.x === dp.x && tp.y === dp.y))) { targetPiece = p; break; }
         }
       }
+      
       if (targetPiece) {
+        //setCapturedPieces(prev => prev.filter(p => p.id !== pieceId));
         const combatResult = resolveCombat(activePiece, targetPiece, finalTo, nextPieces);
         if (combatResult.capturedPiece) {
           const capDef = combatResult.capturedPiece.definitionId;
           const originalDefId = DEMOTE_MAP[capDef] || capDef;
           const newCapId = `cap_${Date.now()}_${Math.random()}`;
-          setCapturedPieces(prev => [...prev, { ...combatResult.capturedPiece!, owner: currentPlayer, definitionId: originalDefId, id: newCapId }]);
+          // ★修正：ownerを currentPlayer から combatResult...owner に変更し、戦闘結果を尊重する
+          setCapturedPieces(prev => [...prev, { ...combatResult.capturedPiece!, owner: combatResult.capturedPiece.owner, definitionId: originalDefId, id: newCapId }]);
           if (PIECE_DEFINITIONS[capDef]?.tags?.includes('force_drop_if_captured')) {
             setMustDropState({ playerId: currentPlayer, pieceId: newCapId }); skipTurnChange = false; 
           }
@@ -441,7 +445,6 @@ export const useGameEngine = () => {
     const finalizeMove = () => {
       if (!isDrop) {
         const movedPieceNow = nextPieces.find(p => p.id === activePiece.id);
-        // ★修正：手前ストップ判定（promotionCanceled）がある場合は成りを発動させない
         if (movedPieceNow && !promotionCanceled && checkPromotion(movedPieceNow, movedPieceNow.position)) {
           const effectiveDef = getEffectiveDefinition(movedPieceNow);
           setPendingPromotion({ pieceId: activePiece.id, promoteTo: effectiveDef.promotion!.promoteTo, skipTurnChange });
@@ -522,8 +525,9 @@ export const useGameEngine = () => {
       return; 
     }
 
-    let chosenAnchor: Position | null = null;
     const activePiece = selectedBoardPiece || selectedCapturedPiece;
+
+    let chosenAnchor: Position | null = null;
     if (activePiece) {
       for (const mPos of movablePositions) {
         if (getOccupiedPositions({ ...activePiece, position: mPos }).some(pos => pos.x === x && pos.y === y)) { chosenAnchor = mPos; break; }
@@ -533,9 +537,7 @@ export const useGameEngine = () => {
     if (chosenAnchor && activePiece) {
       const activeDef = getEffectiveDefinition(activePiece);
       if (activePiece.definitionId === 'wolf' && !!selectedCapturedPiece) { setWolfDeclaration({ source: 'hand', owner: currentPlayer, x: chosenAnchor.x, y: chosenAnchor.y, pieceId: activePiece.id }); return; }
-      
       if (activeDef?.tags?.includes('requires_gamble') && !turnState.isSecondMove) { setPendingAction({ pieceId: activePiece.id, to: chosenAnchor, isDrop: !!selectedCapturedPiece }); setChohanState(null); setPhase('minigame_chohan'); return; }
-      
       if (activeDef?.tags?.includes('renda_minigame')) {
         const dist = !!selectedCapturedPiece ? 1 : Math.max(Math.abs(chosenAnchor.x - activePiece.position.x), Math.abs(chosenAnchor.y - activePiece.position.y));
         const req = dist * (rendaQuotas[currentPlayer] + (activePiece.components.useCount || 0));
@@ -563,6 +565,10 @@ export const useGameEngine = () => {
       const def = getEffectiveDefinition(clickedPiece);
       if (def?.id === 'white_sage' && !clickedPiece.components?.isExhausted) {
         setSwapAbilityState({ pieceId: clickedPiece.id, step: 'ask' });
+      } else if (def?.tags?.includes('gamble_jump')) {
+        // ★新規：盤面の「転移」をクリックした瞬間にルーレット確認へ移行
+        setPendingAction({ pieceId: clickedPiece.id, to: { x: 0, y: 0 }, isDrop: false });
+        setPhase('minigame_gamble_jump');
       } else {
         setSwapAbilityState(null);
       }
@@ -599,8 +605,15 @@ export const useGameEngine = () => {
     const target = capturedPieces.find(p => p.id === pieceId);
     if (target && target.owner === currentPlayer) {
       if (PIECE_DEFINITIONS[target.definitionId]?.tags?.includes('bullet_minigame')) { startBulletMinigame(pieceId); return; }
+      
       setSelectedPieceId(pieceId);
       setSwapAbilityState(null);
+
+      // ★新規：手持ちの「転移」をクリックした瞬間にルーレット確認へ移行
+      if (PIECE_DEFINITIONS[target.definitionId]?.tags?.includes('gamble_jump')) {
+        setPendingAction({ pieceId: pieceId, to: { x: 0, y: 0 }, isDrop: true });
+        setPhase('minigame_gamble_jump');
+      }
     }
   };
 
@@ -641,7 +654,7 @@ export const useGameEngine = () => {
     setPendingMineConfirmation(null);
   };
 
-  const startRendaSetting = () => setRendaSettingState({ clicks: 0, isActive: true, timeLeft: 5 });
+  const startRendaSetting = () => setRendaSettingState({ clicks: 0, isActive: true, timeLeft: 2 });
   const clickRendaSetting = () => setRendaSettingState(prev => prev && prev.isActive ? { ...prev, clicks: prev.clicks + 1 } : null);
   const tickRendaSetting = () => setRendaSettingState(prev => prev ? { ...prev, timeLeft: prev.timeLeft - 1 } : null);
   const finishRendaSetting = () => {
@@ -698,9 +711,39 @@ export const useGameEngine = () => {
   const resolvePromotion = (doPromote: boolean) => {
     if (!pendingPromotion) return;
     let nextBoard = [...pieces];
-    if (doPromote) { nextBoard = nextBoard.map(p => p.id === pendingPromotion.pieceId ? (p.definitionId === 'wolf' ? { ...p, components: { ...p.components, mimicRole: pendingPromotion.promoteTo } } : { ...p, definitionId: pendingPromotion.promoteTo }) : p); setPieces(nextBoard); }
-    if (!pendingPromotion.skipTurnChange) { endCurrentTurn(nextBoard); setSelectedPieceId(null); } else { setSelectedPieceId(pendingPromotion.pieceId); setTurnState(prev => ({ ...prev, isSecondMove: true })); }
+    
+    if (doPromote) {
+      if (pendingPromotion.promoteTo === 'promoted_anti_promote') {
+        nextBoard = nextBoard.map(p => {
+          if (p.id === pendingPromotion.pieceId) return { ...p, definitionId: 'promoted_anti_promote' };
+          if (DEMOTE_MAP[p.definitionId]) {
+            return { ...p, definitionId: DEMOTE_MAP[p.definitionId] };
+          }
+          return p;
+        });
+      } else {
+        nextBoard = nextBoard.map(p => p.id === pendingPromotion.pieceId ? (p.definitionId === 'wolf' ? { ...p, components: { ...p.components, mimicRole: pendingPromotion.promoteTo } } : { ...p, definitionId: pendingPromotion.promoteTo }) : p);
+      }
+      setPieces(nextBoard);
+    }
+    
+    if (!pendingPromotion.skipTurnChange) { endCurrentTurn(nextBoard); setSelectedPieceId(null); } 
+    else { setSelectedPieceId(pendingPromotion.pieceId); setTurnState(prev => ({ ...prev, isSecondMove: true })); }
     setPendingPromotion(null);
+  };
+
+  const resolveGambleJump = (x: number, y: number) => {
+    if (!pendingAction) return;
+    executeMove(pendingAction.pieceId, { x, y }, pendingAction.isDrop);
+    setPhase('playing');
+    setPendingAction(null);
+  };
+
+  // ★新規：キャンセル処理
+  const cancelGambleJump = () => {
+    setPhase('playing');
+    setPendingAction(null);
+    setSelectedPieceId(null);
   };
 
   const resolveWolfDeclaration = (roleId: string) => {
@@ -762,6 +805,6 @@ export const useGameEngine = () => {
     rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState,
     handleCellClick, handleCapturedClick, resolvePromotion, resolveWolfDeclaration, resetGame,
     proceedAccusation, cancelAccusation, resolveAccusation, closeAccusationResult, playChohan, resolveChohan, startRoulette, resolveRoulette, resolveBombActivation, resolveBullet,
-    startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation, resolveSwapAbility
+    startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation, resolveSwapAbility, resolveGambleJump, cancelGambleJump
   };
 };

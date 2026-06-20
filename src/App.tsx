@@ -6,6 +6,14 @@ import { Piece as PieceComponent } from './components/Piece';
 import { useGameEngine, WOLF_ROLES } from './engine/useGameEngine';
 import { PIECE_DEFINITIONS } from './data/pieces';
 
+// ★新規追加：転移ルーレット用の20分割データ（1~5が4回繰り返される）
+const JUMP_TARGETS = Array.from({length: 20}, (_, i) => ({ 
+  value: (i % 5) + 1, 
+  color: ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7'][i % 5], 
+  startAngle: i * 18, 
+  endAngle: (i + 1) * 18 
+}));
+
 function App() {
   const { 
     phase, pieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, movablePositions, 
@@ -14,12 +22,76 @@ function App() {
     rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState,
     resolvePromotion, resolveWolfDeclaration, proceedAccusation, cancelAccusation, resolveAccusation, closeAccusationResult, 
     playChohan, resolveChohan, startRoulette, resolveRoulette, resolveBombActivation, resolveBullet,
-    startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation, resolveSwapAbility
+    startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation, resolveSwapAbility, resolveGambleJump, cancelGambleJump
   } = useGameEngine();
 
   const [rotationAngle, setRotationAngle] = useState(0);
   const [isSpinning, setIsSpinning] = useState(false);
   const [bulletResult, setBulletResult] = useState<{ targetId: string | null, label: string } | null>(null);
+
+  // --- ★新規追加：転移ルーレット用ステート ---
+  const [jumpRotationAngle, setJumpRotationAngle] = useState(0);
+  const [jumpIsSpinning, setJumpIsSpinning] = useState(false);
+  const [jumpStep, setJumpStep] = useState<'idle' | 'spinX' | 'spinY' | 'result'>('idle');
+  const [jumpResultX, setJumpResultX] = useState<number | null>(null);
+  const [jumpResultY, setJumpResultY] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (phase === 'minigame_gamble_jump') {
+      setJumpRotationAngle(0);
+      setJumpStep('spinX');
+      setJumpIsSpinning(true);
+      setJumpResultX(null);
+      setJumpResultY(null);
+    } else {
+      setJumpStep('idle');
+    }
+  }, [phase]);
+
+  useEffect(() => {
+    let animFrame: number;
+    let lastTime = performance.now();
+    const animate = (time: number) => {
+      if (phase === 'minigame_gamble_jump' && jumpIsSpinning) {
+        const delta = time - lastTime;
+        lastTime = time;
+        setJumpRotationAngle(prev => prev + (400 * delta / 1000));
+        animFrame = requestAnimationFrame(animate);
+      }
+    };
+    if (phase === 'minigame_gamble_jump' && jumpIsSpinning) {
+      animFrame = requestAnimationFrame(animate);
+    }
+    return () => cancelAnimationFrame(animFrame);
+  }, [phase, jumpIsSpinning]);
+
+  const handleStopJump = () => {
+    // ★目押し防止：ストップを押した瞬間に 1.5〜3.5マス分（27度〜63度）ランダムに滑る
+    const slip = Math.floor(Math.random() * 36) + 27; 
+    const finalAngle = jumpRotationAngle + slip; 
+    setJumpRotationAngle(finalAngle); // CSSのtransitionでスーッと滑って止まる
+    setJumpIsSpinning(false);
+
+    // 針の判定（滑った後の角度で計算）
+    const normalizedFinal = finalAngle % 360;
+    const needleAngleOnDisk = (360 - normalizedFinal) % 360;
+    const hitTarget = JUMP_TARGETS.find(t => needleAngleOnDisk >= t.startAngle && needleAngleOnDisk < t.endAngle);
+    const value = hitTarget ? hitTarget.value : 1;
+
+    if (jumpStep === 'spinX') {
+      setJumpResultX(value);
+      setTimeout(() => {
+        setJumpStep('spinY');
+        setJumpIsSpinning(true);
+      }, 1000);
+    } else if (jumpStep === 'spinY') {
+      setJumpResultY(value);
+      setTimeout(() => {
+        setJumpStep('result');
+      }, 600); // アニメーションが終わるのを待って結果フェーズへ
+    }
+  };
+  // ------------------------------------------
 
   useEffect(() => {
     if (phase === 'minigame_bullet' && bulletMinigameData) {
@@ -93,12 +165,13 @@ function App() {
     <div className="min-h-screen bg-gray-900 text-white font-sans relative pb-10 overflow-hidden">
       <div className="text-center pt-8">
         <h1 className="text-3xl font-bold mb-2">Custom Board Game</h1>
-        {/* ★ここに確実に見える注意書きを追加★ */}
         <div className="max-w-xl mx-auto mb-4 px-4 py-2 bg-gray-800 border border-yellow-600 rounded-lg text-xs text-yellow-400 text-left">
           <p className="font-bold mb-1">⚠️ 二次創作に関するガイドラインへの配慮</p>
-          <p>本ゲームは、オモコロチャンネル様(https://www.youtube.com/@omocorochannel)の動画企画「将棋の新弾」を元にした、ファンによる非公式の二次創作（開発途中版）です。公式（株式会社バーグハンバーグバーグ様）とは一切関係ありません。完全非営利で運営されており、権利所有者様からの取り下げ要請があった場合は速やかに公開を停止します。</p>
+          <p>本ゲームは、オモコロチャンネル様(https://www.youtube.com/@omocorochannel)の動画企画「将棋の新弾」を元にした、ファンによる非公式の二次創作（開発途中版）です。</p>
+          <p>公式（株式会社バーグハンバーグバーグ様）とは一切関係ありません。</p>
+          <p>完全非営利で運営されており、権利所有者様からの取り下げ要請があった場合は速やかに公開を停止します。</p>
           <p>"双子"のコマ二種につきましては、@MADOguchimoto様の投稿(X:旧Twitter)https://x.gd/fzSC4が本家になります。</p>
-          <p>"白の賢人"につきましては、同投稿者様の投稿https://x.gd/srSvcが本家になります。</p>
+          <p>"白の賢人","転移"につきましては、同投稿者様の投稿https://x.gd/srSvcが本家になります。</p>
           <p>上記原作者様達へのリスペクトは前提ですが、コードを弄れる方は、ぜひ自由に改造して遊んだり、より良いものに進化させたりしてください。よろしくお願いいたします。</p>
         </div>
         <div className={`inline-block px-6 py-2 rounded-full font-bold shadow-lg mb-2 ${winner ? 'bg-yellow-500' : swapAbilityState ? 'bg-indigo-600' : phase === 'playing' ? (currentPlayer === 'player1' ? 'bg-blue-600' : 'bg-red-600') : 'bg-gray-600'}`}>{statusText}</div>
@@ -148,7 +221,79 @@ function App() {
         </div>
       </div>
 
-      {/* --- ★新規：白賢の入れ替え能力ダイアログ --- */}
+      {/* --- ★新規実装：滑って止まる「転移ルーレット」 --- */}
+      {phase === 'minigame_gamble_jump' && (
+        <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
+          <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-2 border-green-500 max-w-md w-full">
+            <h2 className="text-3xl font-bold mb-4 text-green-400">転移ルーレット</h2>
+            <p className="mb-4 text-gray-300 text-sm">
+              {jumpStep === 'spinX' ? 'X座標（横）を決定します！' : jumpStep === 'spinY' ? 'Y座標（縦）を決定します！' : 'ジャンプ先が決定しました！'}<br/>
+              移動先に味方がいた場合、巻き込んで相手の駒になります。
+            </p>
+            
+            <div className="flex justify-around mb-6 text-2xl bg-gray-900 p-2 rounded-lg border border-gray-700">
+              <div>X: <span className={`font-bold ${jumpResultX !== null ? 'text-green-400' : 'text-gray-500'}`}>{jumpResultX !== null ? jumpResultX : '?'}</span></div>
+              <div>Y: <span className={`font-bold ${jumpResultY !== null ? 'text-green-400' : 'text-gray-500'}`}>{jumpResultY !== null ? jumpResultY : '?'}</span></div>
+            </div>
+
+            <div className="mb-8 flex flex-col items-center justify-center relative">
+               <div className="absolute top-[-10px] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[10px] border-r-[10px] border-t-[20px] border-l-transparent border-r-transparent border-t-white z-20" />
+               <div 
+                 className="w-56 h-56 rounded-full border-4 border-gray-600 shadow-[0_0_20px_rgba(0,0,0,1)] relative overflow-hidden"
+                 style={{ 
+                   background: `conic-gradient(${JUMP_TARGETS.map(t => `${t.color} ${t.startAngle}deg, ${t.color} ${t.endAngle}deg`).join(', ')})`,
+                   transform: `rotate(${jumpRotationAngle}deg)`,
+                   // スピン中以外は CSS Transition でスーッと滑って止まるようにする
+                   transition: jumpIsSpinning ? 'none' : 'transform 0.5s cubic-bezier(0.25, 1, 0.5, 1)'
+                 }}
+               >
+                 {JUMP_TARGETS.map(t => {
+                   const midAngle = (t.startAngle + t.endAngle) / 2;
+                   return (
+                     <div 
+                       key={`${t.value}-${t.startAngle}`}
+                       className="absolute top-0 left-0 w-full h-full flex items-start justify-center pt-2 pointer-events-none"
+                       style={{ transform: `rotate(${midAngle}deg)` }}
+                     >
+                       <span className="text-white font-bold text-sm drop-shadow-md">{t.value}</span>
+                     </div>
+                   )
+                 })}
+                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-gray-800 rounded-full z-10" />
+               </div>
+            </div>
+            
+
+            <div className="flex flex-col gap-3">
+              {(jumpStep === 'spinX' || jumpStep === 'spinY') ? (
+                <button 
+                  onClick={handleStopJump} 
+                  disabled={!jumpIsSpinning}
+                  className={`px-8 py-3 rounded font-bold text-xl w-full ${jumpIsSpinning ? 'bg-red-600 hover:bg-red-500' : 'bg-red-900 text-gray-400'}`}
+                >
+                  STOP!
+                </button>
+              ) : jumpStep === 'result' ? (
+                <button 
+                  onClick={() => resolveGambleJump((jumpResultX || 1) - 1, (jumpResultY || 1) - 1)} 
+                  className="px-8 py-3 bg-blue-600 hover:bg-blue-500 rounded font-bold text-xl w-full animate-pulse"
+                >
+                  転移する！
+                </button>
+              ) : null}
+
+              {/* ★修正：「やめる」ボタンはX座標が決まる前だけ表示する */}
+              {jumpStep === 'spinX' && jumpResultX === null && (
+                <button onClick={cancelGambleJump} className="px-8 py-2 bg-gray-600 hover:bg-gray-500 rounded font-bold text-md w-full">
+                  やめる
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ------------------------------------------- */}
+
       {swapAbilityState?.step === 'ask' && (
         <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
           <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-2 border-white max-w-md w-full">
@@ -209,9 +354,9 @@ function App() {
         <div className="absolute inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50">
           <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-4 border-purple-500 max-w-md w-full">
             <h2 className={`text-3xl font-bold mb-4 ${phase==='renda_quota_p1' ? 'text-blue-400' : 'text-red-400'}`}>連打妨害！</h2>
-            <p className="mb-4 text-gray-300">相手の「連打コマ」の必要ノルマを決めることができます。<br/>5秒間で連打した回数が、1マスあたりの必要回数になります！</p>
+            <p className="mb-4 text-gray-300">相手の「連打コマ」の必要ノルマを決めることができます。<br/>2秒間で連打した回数が、1マスあたりの必要回数になります！</p>
             {!rendaSettingState ? (
-              <button onClick={startRendaSetting} className="w-full py-4 bg-purple-600 hover:bg-purple-500 rounded font-bold text-2xl animate-pulse">準備完了 (5秒スタート)</button>
+              <button onClick={startRendaSetting} className="w-full py-4 bg-purple-600 hover:bg-purple-500 rounded font-bold text-2xl animate-pulse">準備完了 (2秒スタート)</button>
             ) : (
               <>
                 <div className="text-6xl font-black mb-6 text-yellow-400">{rendaSettingState.clicks} 回</div>

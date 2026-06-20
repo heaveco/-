@@ -55,7 +55,7 @@ export const PIECE_DEFINITIONS: Record<string, PieceDefinition> = {
   // --- ★新規追加：「双子」と「双暗（双子の暗殺者）」 ---
   twins: {
     id: 'twins',
-    name: '双子',
+    name: '回復する双子',
     size: { width: 2, height: 1 },
     tags: ['start_in_hand', 'boss_target', 'immobilized_if_damaged'],
     defaultComponents: { hp: 2 },
@@ -66,7 +66,7 @@ export const PIECE_DEFINITIONS: Record<string, PieceDefinition> = {
   },
   twin_assassin: {
     id: 'twin_assassin',
-    name: '双暗',
+    name: '双子の暗殺者',
     size: { width: 2, height: 1 },
     tags: ['start_in_hand', 'split_on_hit'], // 被弾時に分裂する専用タグ
     // 左斜め前・右斜め前・後ろに移動可能
@@ -101,5 +101,14 @@ export const PIECE_DEFINITIONS: Record<string, PieceDefinition> = {
     name: '霊',
     tags: ['ghost_possession'],
     moveRules: [{ generator: 'relative', params: [{ dx: -1, dy: -1 }, { dx: 0, dy: -1 }, { dx: 1, dy: -1 }, { dx: -1, dy: 0 }, { dx: 1, dy: 0 }, { dx: -1, dy: 1 }, { dx: 0, dy: 1 }, { dx: 1, dy: 1 }] }]
+  },
+  gamble_jumper: { 
+    id: 'gamble_jumper', name: '転移', tags: ['gamble_jump'], moveRules: [] 
+  },
+  anti_promote: { 
+    id: 'anti_promote', name: '反成', moveRules: [{ generator: 'relative', params: [{ dx: 0, dy: -1 }] }], promotion: { condition: 'in_enemy_zone', promoteTo: 'promoted_anti_promote' } 
+  },
+  promoted_anti_promote: { 
+    id: 'promoted_anti_promote', name: '×', tags: ['exhausted'], moveRules: [] 
   }
 };
