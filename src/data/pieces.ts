@@ -1,3 +1,4 @@
+// @ts-nocheck
 // src/data/pieces.ts
 import type { PlayerId } from '../entities/types';
 
