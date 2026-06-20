@@ -1,6 +1,6 @@
 // @ts-nocheck
 // src/App.tsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Board } from './components/Board';
 import { Piece as PieceComponent } from './components/Piece';
 import { useGameEngine, WOLF_ROLES } from './engine/useGameEngine';
@@ -29,18 +29,30 @@ function App() {
   const [isSpinning, setIsSpinning] = useState(false);
   const [bulletResult, setBulletResult] = useState<{ targetId: string | null, label: string } | null>(null);
 
-  // --- ★新規追加：転移ルーレット用ステート ---
+  // --- 転移ルーレット用ステート ---
   const [jumpRotationAngle, setJumpRotationAngle] = useState(0);
   const [jumpIsSpinning, setJumpIsSpinning] = useState(false);
   const [jumpStep, setJumpStep] = useState<'idle' | 'spinX' | 'spinY' | 'result'>('idle');
   const [jumpResultX, setJumpResultX] = useState<number | null>(null);
   const [jumpResultY, setJumpResultY] = useState<number | null>(null);
+  const [jumpSpeed, setJumpSpeed] = useState(400);
+
+  // ★追加：Reactのレンダリングラグを無視して即座にアニメーションを止めるためのRef
+  const jumpAngleRef = useRef(0);
+  const jumpIsSpinningRef = useRef(false);
 
   useEffect(() => {
     if (phase === 'minigame_gamble_jump') {
-      setJumpRotationAngle(0);
+      const initialAngle = Math.random() * 360;
+      jumpAngleRef.current = initialAngle;
+      setJumpRotationAngle(initialAngle);
+      
+      setJumpSpeed(Math.floor(Math.random() * 400) + 300);
       setJumpStep('spinX');
+      
+      jumpIsSpinningRef.current = true;
       setJumpIsSpinning(true);
+      
       setJumpResultX(null);
       setJumpResultY(null);
     } else {
@@ -52,10 +64,12 @@ function App() {
     let animFrame: number;
     let lastTime = performance.now();
     const animate = (time: number) => {
-      if (phase === 'minigame_gamble_jump' && jumpIsSpinning) {
+      // ★修正：StateではなくRefを直接参照することで、暴走を確実に防ぐ
+      if (phase === 'minigame_gamble_jump' && jumpIsSpinningRef.current) {
         const delta = time - lastTime;
         lastTime = time;
-        setJumpRotationAngle(prev => prev + (400 * delta / 1000));
+        jumpAngleRef.current += (jumpSpeed * delta / 1000);
+        setJumpRotationAngle(jumpAngleRef.current);
         animFrame = requestAnimationFrame(animate);
       }
     };
@@ -63,12 +77,17 @@ function App() {
       animFrame = requestAnimationFrame(animate);
     }
     return () => cancelAnimationFrame(animFrame);
-  }, [phase, jumpIsSpinning]);
+  }, [phase, jumpIsSpinning, jumpSpeed]);
 
   const handleStopJump = () => {
     // ★目押し防止：ストップを押した瞬間に 1.5〜3.5マス分（27度〜63度）ランダムに滑る
     const slip = Math.floor(Math.random() * 36) + 27; 
-    const finalAngle = jumpRotationAngle + slip; 
+    const finalAngle = jumpAngleRef.current + slip; 
+    
+    // アニメーションループを強制終了させる
+    jumpAngleRef.current = finalAngle;
+    jumpIsSpinningRef.current = false;
+    
     setJumpRotationAngle(finalAngle); // CSSのtransitionでスーッと滑って止まる
     setJumpIsSpinning(false);
 
@@ -82,13 +101,15 @@ function App() {
       setJumpResultX(value);
       setTimeout(() => {
         setJumpStep('spinY');
+        setJumpSpeed(Math.floor(Math.random() * 400) + 300); 
+        jumpIsSpinningRef.current = true;
         setJumpIsSpinning(true);
       }, 1000);
     } else if (jumpStep === 'spinY') {
       setJumpResultY(value);
       setTimeout(() => {
         setJumpStep('result');
-      }, 600); // アニメーションが終わるのを待って結果フェーズへ
+      }, 600);
     }
   };
   // ------------------------------------------
@@ -221,7 +242,7 @@ function App() {
         </div>
       </div>
 
-      {/* --- ★新規実装：滑って止まる「転移ルーレット」 --- */}
+      {/* --- 転移ルーレット画面 --- */}
       {phase === 'minigame_gamble_jump' && (
         <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
           <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-2 border-green-500 max-w-md w-full">
@@ -243,7 +264,6 @@ function App() {
                  style={{ 
                    background: `conic-gradient(${JUMP_TARGETS.map(t => `${t.color} ${t.startAngle}deg, ${t.color} ${t.endAngle}deg`).join(', ')})`,
                    transform: `rotate(${jumpRotationAngle}deg)`,
-                   // スピン中以外は CSS Transition でスーッと滑って止まるようにする
                    transition: jumpIsSpinning ? 'none' : 'transform 0.5s cubic-bezier(0.25, 1, 0.5, 1)'
                  }}
                >
@@ -263,7 +283,6 @@ function App() {
                </div>
             </div>
             
-
             <div className="flex flex-col gap-3">
               {(jumpStep === 'spinX' || jumpStep === 'spinY') ? (
                 <button 
@@ -282,7 +301,6 @@ function App() {
                 </button>
               ) : null}
 
-              {/* ★修正：「やめる」ボタンはX座標が決まる前だけ表示する */}
               {jumpStep === 'spinX' && jumpResultX === null && (
                 <button onClick={cancelGambleJump} className="px-8 py-2 bg-gray-600 hover:bg-gray-500 rounded font-bold text-md w-full">
                   やめる
