@@ -44,7 +44,7 @@ export const resolveCombat = (
     if (isKnight) {
       // 桂馬のジャンプ攻撃は、着地点のめり込み数を計算
       const jumpArea = getOccupiedPositions({ ...attacker, position: clickedPos });
-      const targetArea = getOccupiedPositions(actualTarget);
+      const targetArea = getOccupiedPositions(target);
       const overlap = getOverlapCount(jumpArea, targetArea);
       if (overlap > 0) calculatedDamage = overlap;
       return attacker.position;
@@ -54,7 +54,7 @@ export const resolveCombat = (
     const dy = Math.sign(clickedPos.y - attacker.position.y);
     let current = attacker.position;
     let previous = current;
-    const targetArea = getOccupiedPositions(actualTarget); 
+    const targetArea = getOccupiedPositions(target); 
 
     for (let i = 0; i < 5; i++) {
       const nextPos = { x: current.x + dx, y: current.y + dy };
