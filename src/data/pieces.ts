@@ -93,7 +93,7 @@ export const PIECE_DEFINITIONS: Record<string, PieceDefinition> = {
   shield: {
     id: 'shield',
     name: '盾',
-    tags: ['start_in_hand', 'shield_passive'],
+    tags: ['shield_passive'],
     moveRules: [] // 動けない
   },
   ghost: {

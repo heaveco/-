@@ -12,7 +12,6 @@ const INITIAL_KINGS: Piece[] = [
   { id: 'p2_king', definitionId: 'king', owner: 'player2', position: { x: 2, y: 0 }, components: {} },
 ];
 
-// ★茸、盾、霊を追加
 const PIECE_POOL = ['pawn', 'silver', 'gold', 'lance', 'rook', 'bishop', 'knight', 'troll', 'trickster', 'wolf', 'hero', 'nuisance', 'bomb', 'landmine', 'bullet', 'drunk', 'renda', 'twins', 'twin_assassin', 'white_sage', 'mushroom', 'shield', 'ghost']; 
 const DEMOTE_MAP: Record<string, string> = { 'tokin': 'pawn', 'promoted_silver': 'silver', 'promoted_lance': 'lance', 'promoted_rook': 'rook', 'promoted_bishop': 'bishop', 'promoted_knight': 'knight', 'promoted_trickster': 'trickster', 'promoted_drunk': 'drunk' };
 
@@ -126,6 +125,8 @@ export const useGameEngine = () => {
           const area = getOccupiedPositions(hypo);
           const isOverlap = pieces.some(p => {
             if (PIECE_DEFINITIONS[p.definitionId]?.tags?.includes('trap')) return false;
+            // ★修正：霊を持ち駒から出すとき、相手の駒の上に憑依ドロップできるようにする
+            if (def?.tags?.includes('ghost_possession') && p.owner !== currentPlayer) return false;
             return getOccupiedPositions(p).some(ep => area.some(pos => pos.x === ep.x && pos.y === ep.y));
           });
           if (!isOverlap) movablePositions.push({ x, y });
@@ -138,7 +139,6 @@ export const useGameEngine = () => {
     let nextBoard = [...currentBoard];
     let newWinner: VictoryResult | null = null;
     
-    // ★茸（毒）の回復と、双子の回復処理
     nextBoard = nextBoard.map(p => {
       let newComps = { ...p.components };
       if (p.owner === nextPlayer) {
@@ -180,10 +180,10 @@ export const useGameEngine = () => {
       nextBoard = nextBoard.filter(target => {
         const tArea = getOccupiedPositions(target);
         const isHit = tArea.some(tp => allExAreas.some(ep => tp.x === ep.x && tp.y === ep.y));
-        if (shieldsToDestroy.has(target.id)) return false; // 盾消費
+        if (shieldsToDestroy.has(target.id)) return false; 
         if (isHit && target.definitionId === 'king') {
            const shield = nextBoard.find(p => p.owner === target.owner && p.definitionId === 'shield');
-           if (shield) return true; // 盾があれば王は生き残る
+           if (shield) return true; 
         }
         return !isHit; 
       });
@@ -211,6 +211,7 @@ export const useGameEngine = () => {
   const executeMove = (pieceId: string, to: Position, isDrop: boolean, skipTurnChange: boolean = false, wolfMimicRole?: string, newUseCount?: number, destroyedAllyMineIds?: string[]) => {
     let nextPieces = [...pieces];
     let lastActionData: any = null;
+    let promotionCanceled = false; // ★新規：手前ストップによる成りキャンセルフラグ
     const activePiece = isDrop ? capturedPieces.find(p => p.id === pieceId) : pieces.find(p => p.id === pieceId);
     if (!activePiece) return;
 
@@ -295,12 +296,39 @@ export const useGameEngine = () => {
         lastActionData = { type: 'move' };
       }
     } else if (isDrop) {
-      setCapturedPieces(prev => prev.filter(p => p.id !== pieceId));
-      const newPiece = { ...activePiece, position: finalTo };
-      if (wolfMimicRole) newPiece.components.mimicRole = wolfMimicRole;
-      if (newUseCount !== undefined) newPiece.components.useCount = newUseCount;
-      nextPieces = [...nextPieces, newPiece];
-      lastActionData = { type: 'drop', definitionId: newPiece.definitionId, x: finalTo.x };
+      // ★修正：ドロップ時に敵駒の上に置いた場合（霊の憑依処理など）
+      let targetPiece = undefined;
+      for (const p of nextPieces) {
+        if (p.owner !== currentPlayer) {
+          const targetArea = getOccupiedPositions(p);
+          const myDestArea = getOccupiedPositions({ ...activePiece, position: finalTo });
+          if (myDestArea.some(dp => targetArea.some(tp => tp.x === dp.x && tp.y === dp.y))) { targetPiece = p; break; }
+        }
+      }
+      
+      if (targetPiece) {
+        setCapturedPieces(prev => prev.filter(p => p.id !== pieceId));
+        const combatResult = resolveCombat(activePiece, targetPiece, finalTo, nextPieces);
+        if (combatResult.capturedPiece) {
+          const capDef = combatResult.capturedPiece.definitionId;
+          const originalDefId = DEMOTE_MAP[capDef] || capDef;
+          const newCapId = `cap_${Date.now()}_${Math.random()}`;
+          setCapturedPieces(prev => [...prev, { ...combatResult.capturedPiece!, owner: currentPlayer, definitionId: originalDefId, id: newCapId }]);
+          if (PIECE_DEFINITIONS[capDef]?.tags?.includes('force_drop_if_captured')) {
+            setMustDropState({ playerId: currentPlayer, pieceId: newCapId }); skipTurnChange = false; 
+          }
+        }
+        nextPieces = combatResult.nextBoard;
+        promotionCanceled = combatResult.promotionCanceled;
+        lastActionData = { type: 'drop', definitionId: activePiece.definitionId, x: finalTo.x };
+      } else {
+        setCapturedPieces(prev => prev.filter(p => p.id !== pieceId));
+        const newPiece = { ...activePiece, position: finalTo };
+        if (wolfMimicRole) newPiece.components.mimicRole = wolfMimicRole;
+        if (newUseCount !== undefined) newPiece.components.useCount = newUseCount;
+        nextPieces = [...nextPieces, newPiece];
+        lastActionData = { type: 'drop', definitionId: newPiece.definitionId, x: finalTo.x };
+      }
       if (mustDropState?.pieceId === pieceId) setMustDropState(null); 
     } else if (isPusher) {
       const dx = Math.sign(finalTo.x - activePiece.position.x);
@@ -338,7 +366,6 @@ export const useGameEngine = () => {
           } else {
             const steppingPiece = pushedGroup.find(p => getOccupiedPositions({ ...p, position: { x: p.position.x + dx, y: p.position.y + dy } }).some(pos => getOccupiedPositions(target).some(tpos => tpos.x === pos.x && tpos.y === pos.y)));
             
-            // ★玉突き時の盾身代わり処理
             if (target.definitionId === 'king') {
                const shield = nextPieces.find(p => p.owner === target.owner && p.definitionId === 'shield');
                if (shield) {
@@ -347,7 +374,6 @@ export const useGameEngine = () => {
                }
             }
 
-            // ★玉突き時の霊の処理
             if (target.definitionId === 'ghost' && !target.components?.possessed && steppingPiece) {
                target.components.possessed = steppingPiece.definitionId;
                nextPieces = nextPieces.filter(p => p.id !== steppingPiece.id); 
@@ -368,7 +394,6 @@ export const useGameEngine = () => {
               if (PIECE_DEFINITIONS[capDef]?.tags?.includes('force_drop_if_captured')) {
                 setMustDropState({ playerId: O1, pieceId: newCapId }); skipTurnChange = false; 
               }
-              // ★茸の毒処理
               if (PIECE_DEFINITIONS[capDef]?.tags?.includes('poisonous') && steppingPiece) {
                  steppingPiece.components.mushroomTimer = 2;
               }
@@ -400,6 +425,7 @@ export const useGameEngine = () => {
           }
         }
         nextPieces = combatResult.nextBoard;
+        promotionCanceled = combatResult.promotionCanceled;
       } else {
         nextPieces = nextPieces.map(p => p.id === activePiece.id ? { ...p, position: finalTo, components: { ...p.components, useCount: newUseCount ?? p.components.useCount } } : p);
       }
@@ -415,7 +441,8 @@ export const useGameEngine = () => {
     const finalizeMove = () => {
       if (!isDrop) {
         const movedPieceNow = nextPieces.find(p => p.id === activePiece.id);
-        if (movedPieceNow && checkPromotion(movedPieceNow, movedPieceNow.position)) {
+        // ★修正：手前ストップ判定（promotionCanceled）がある場合は成りを発動させない
+        if (movedPieceNow && !promotionCanceled && checkPromotion(movedPieceNow, movedPieceNow.position)) {
           const effectiveDef = getEffectiveDefinition(movedPieceNow);
           setPendingPromotion({ pieceId: activePiece.id, promoteTo: effectiveDef.promotion!.promoteTo, skipTurnChange });
           setSelectedPieceId(null);
@@ -506,7 +533,9 @@ export const useGameEngine = () => {
     if (chosenAnchor && activePiece) {
       const activeDef = getEffectiveDefinition(activePiece);
       if (activePiece.definitionId === 'wolf' && !!selectedCapturedPiece) { setWolfDeclaration({ source: 'hand', owner: currentPlayer, x: chosenAnchor.x, y: chosenAnchor.y, pieceId: activePiece.id }); return; }
+      
       if (activeDef?.tags?.includes('requires_gamble') && !turnState.isSecondMove) { setPendingAction({ pieceId: activePiece.id, to: chosenAnchor, isDrop: !!selectedCapturedPiece }); setChohanState(null); setPhase('minigame_chohan'); return; }
+      
       if (activeDef?.tags?.includes('renda_minigame')) {
         const dist = !!selectedCapturedPiece ? 1 : Math.max(Math.abs(chosenAnchor.x - activePiece.position.x), Math.abs(chosenAnchor.y - activePiece.position.y));
         const req = dist * (rendaQuotas[currentPlayer] + (activePiece.components.useCount || 0));
@@ -515,6 +544,7 @@ export const useGameEngine = () => {
         setPhase('minigame_renda_play');
         return;
       }
+
       executeMove(activePiece.id, chosenAnchor, !!selectedCapturedPiece);
       return; 
     }

@@ -6,6 +6,7 @@ import { getEffectiveDefinition, getOccupiedPositions } from './movement';
 export interface CombatResult {
   nextBoard: Piece[];
   capturedPiece: Piece | null;
+  promotionCanceled: boolean; // ★新規：手前ストップによる成りキャンセルフラグ
 }
 
 export const resolveCombat = (
@@ -14,14 +15,16 @@ export const resolveCombat = (
   let nextBoard = [...currentBoard];
   let capturedPiece: Piece | null = null;
   let attackerFinalPos = clickedPos; 
-  let actualTarget = target;
+  let isMoveBlocked = false; // 成りキャンセル判定
 
-  // ★盾の身代わり処理（王への直接攻撃時）
+  let actualTarget = target;
   let isShieldSacrifice = false;
-  if (actualTarget.definitionId === 'king') {
-    const shield = nextBoard.find(p => p.owner === actualTarget.owner && p.definitionId === 'shield');
+
+  // ★修正：王への攻撃時に盾が身代わりになる処理
+  if (target.definitionId === 'king') {
+    const shield = nextBoard.find(p => p.owner === target.owner && p.definitionId === 'shield');
     if (shield) {
-      actualTarget = shield; // 王の代わりに盾が攻撃を受ける
+      actualTarget = shield; // 王の代わりに盾が犠牲になる
       isShieldSacrifice = true;
     }
   }
@@ -29,22 +32,7 @@ export const resolveCombat = (
   const actualTargetDef = getEffectiveDefinition(actualTarget);
   const attackerDef = getEffectiveDefinition(attacker);
 
-  // ★霊の憑依処理（霊が攻撃した時）
-  if (attacker.definitionId === 'ghost' && !attacker.components?.possessed) {
-    nextBoard = nextBoard.filter(p => p.id !== actualTarget.id); // 敵は消滅
-    attackerFinalPos = clickedPos;
-    nextBoard = nextBoard.map(p => p.id === attacker.id ? { ...p, position: attackerFinalPos, components: { ...p.components, possessed: actualTarget.definitionId } } : p);
-    return { nextBoard, capturedPiece: null };
-  }
-
-  // ★霊の憑依処理（霊が攻撃された時）
-  if (actualTarget.definitionId === 'ghost' && !actualTarget.components?.possessed) {
-    nextBoard = nextBoard.filter(p => p.id !== attacker.id); // 攻撃してきた敵が消滅
-    nextBoard = nextBoard.map(p => p.id === actualTarget.id ? { ...p, components: { ...p.components, possessed: attacker.definitionId } } : p);
-    return { nextBoard, capturedPiece: null };
-  }
-
-  // 手前で止まる座標の計算
+  // ★修正：手前ストップの計算は常に「王（本来のターゲット）」に向けて行う
   const calcStopPos = () => {
     const isKnight = attackerDef.id === 'knight'; 
     if (isKnight) return attacker.position;
@@ -52,7 +40,7 @@ export const resolveCombat = (
     const dy = Math.sign(clickedPos.y - attacker.position.y);
     let current = attacker.position;
     let previous = current;
-    const targetArea = getOccupiedPositions(actualTarget);
+    const targetArea = getOccupiedPositions(target); // 実際の対象(王)の座標基準
     for (let i = 0; i < 5; i++) {
       const nextPos = { x: current.x + dx, y: current.y + dy };
       const myNextArea = getOccupiedPositions({ ...attacker, position: nextPos });
@@ -64,7 +52,28 @@ export const resolveCombat = (
     return previous;
   };
 
-  if (actualTargetDef?.tags?.includes('split_on_hit')) {
+  // 1. 盾身代わりの実行
+  if (isShieldSacrifice) {
+    nextBoard = nextBoard.filter(p => p.id !== actualTarget.id); // 盾は消滅
+    capturedPiece = null; // 盾は手に入らない
+    attackerFinalPos = calcStopPos(); // 王の手前で止まる
+    isMoveBlocked = true; // ★対象のマスに入れなかったので成り不可
+  }
+  // 2. 霊が攻撃したときの憑依処理
+  else if (attacker.definitionId === 'ghost' && !attacker.components?.possessed) {
+    nextBoard = nextBoard.filter(p => p.id !== actualTarget.id); 
+    attackerFinalPos = clickedPos;
+    nextBoard = nextBoard.map(p => p.id === attacker.id ? { ...p, position: attackerFinalPos, components: { ...p.components, possessed: actualTarget.definitionId } } : p);
+    return { nextBoard, capturedPiece: null, promotionCanceled: false };
+  }
+  // 3. 霊が攻撃されたとき（攻撃者が霊に取り込まれる）
+  else if (actualTarget.definitionId === 'ghost' && !actualTarget.components?.possessed) {
+    nextBoard = nextBoard.filter(p => p.id !== attacker.id); 
+    nextBoard = nextBoard.map(p => p.id === actualTarget.id ? { ...p, components: { ...p.components, possessed: attacker.definitionId } } : p);
+    return { nextBoard, capturedPiece: null, promotionCanceled: false };
+  }
+  // 4. 双暗の分裂
+  else if (actualTargetDef?.tags?.includes('split_on_hit')) {
     nextBoard = nextBoard.filter(p => p.id !== actualTarget.id);
     capturedPiece = null; 
     attackerFinalPos = clickedPos; 
@@ -75,18 +84,20 @@ export const resolveCombat = (
       id: `${actualTarget.owner}_gold_split_${Date.now()}_${Math.random()}`,
       definitionId: 'gold', owner: actualTarget.owner, position: { x: survivingX, y: actualTarget.position.y }, components: {}
     });
-  } 
-  else if (actualTargetDef?.tags?.includes('boss_target') || isShieldSacrifice || actualTarget.definitionId === 'shield') {
-    attackerFinalPos = calcStopPos();
-
-    if (isShieldSacrifice || actualTarget.definitionId === 'shield') {
+  }
+  // 5. 巨大ボス駒（および直接盾を叩いた場合）
+  else if (actualTargetDef?.tags?.includes('boss_target') || actualTarget.definitionId === 'shield') {
+    if (actualTarget.definitionId === 'shield') {
+      // 身代わりではなく盾を直接攻撃した場合は通常取得
       nextBoard = nextBoard.filter(p => p.id !== actualTarget.id);
-      if (!isShieldSacrifice) capturedPiece = { ...actualTarget, components: {} }; // 盾直接攻撃なら取得
-      else capturedPiece = null; // 身代わり時は消滅するだけ
+      capturedPiece = { ...actualTarget, components: {} }; 
+      attackerFinalPos = clickedPos;
     } else {
       const hp = actualTarget.components.hp ?? 2;
       const newHp = hp - 1;
       if (newHp > 0) {
+        attackerFinalPos = calcStopPos(); // 倒せないので手前で止まる
+        isMoveBlocked = true; // ★マスに入れないため成り不可
         nextBoard = nextBoard.map(p => {
           if (p.id === actualTarget.id) {
             const newComps = { ...p.components, hp: newHp };
@@ -98,12 +109,15 @@ export const resolveCombat = (
       } else {
         nextBoard = nextBoard.filter(p => p.id !== actualTarget.id);
         capturedPiece = { ...actualTarget, components: { ...actualTarget.components, hp: 2 } }; 
+        attackerFinalPos = clickedPos; 
       }
     }
   } 
+  // 6. 通常駒の取得
   else {
     nextBoard = nextBoard.filter(p => p.id !== actualTarget.id);
     capturedPiece = { ...actualTarget, components: { ...actualTarget.components } };
+    attackerFinalPos = clickedPos;
   }
 
   // 取得後の共通クリーンアップ
@@ -114,12 +128,12 @@ export const resolveCombat = (
     if (capturedPiece.definitionId === 'nuisance') capturedPiece.definitionId = 'harm';
   }
 
-  // ★茸（毒）の処理：取得した場合、取得者に休眠タイマーを付与
   let newAttackerComponents = { ...attacker.components };
   if (actualTargetDef?.tags?.includes('poisonous') && capturedPiece) {
-    newAttackerComponents.mushroomTimer = 2; // 2ターン行動不能
+    newAttackerComponents.mushroomTimer = 2; // 茸の毒
   }
 
   nextBoard = nextBoard.map(p => p.id === attacker.id ? { ...p, position: attackerFinalPos, components: newAttackerComponents } : p);
-  return { nextBoard, capturedPiece };
+  
+  return { nextBoard, capturedPiece, promotionCanceled: isMoveBlocked };
 };
