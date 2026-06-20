@@ -82,5 +82,24 @@ export const PIECE_DEFINITIONS: Record<string, PieceDefinition> = {
     defaultComponents: { isExhausted: false },
     // 全ての斜めに1マス。成りはなし。
     moveRules: [{ generator: 'relative', params: [{ dx: -1, dy: -1 }, { dx: 1, dy: -1 }, { dx: -1, dy: 1 }, { dx: 1, dy: 1 }] }]
+  },
+  // --- ★新規追加：「茸」「盾」「霊」 ---
+  mushroom: {
+    id: 'mushroom',
+    name: '茸',
+    tags: ['poisonous'],
+    moveRules: [{ generator: 'relative', params: [{ dx: -1, dy: -1 }, { dx: 0, dy: -1 }, { dx: 1, dy: -1 }, { dx: -1, dy: 1 }, { dx: 1, dy: 1 }] }]
+  },
+  shield: {
+    id: 'shield',
+    name: '盾',
+    tags: ['start_in_hand', 'shield_passive'],
+    moveRules: [] // 動けない
+  },
+  ghost: {
+    id: 'ghost',
+    name: '霊',
+    tags: ['ghost_possession'],
+    moveRules: [{ generator: 'relative', params: [{ dx: -1, dy: -1 }, { dx: 0, dy: -1 }, { dx: 1, dy: -1 }, { dx: -1, dy: 0 }, { dx: 1, dy: 0 }, { dx: -1, dy: 1 }, { dx: 0, dy: 1 }, { dx: 1, dy: 1 }] }]
   }
 };

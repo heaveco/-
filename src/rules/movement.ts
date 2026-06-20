@@ -68,7 +68,8 @@ export const checkPushFeasibility = (pusher: Piece, targetPos: Position, board: 
 
   if (targets.some(t => t.owner === O1)) return false;
   
-  const solidTargets = targets.filter(t => !PIECE_DEFINITIONS[t.definitionId]?.tags?.includes('trap'));
+  // ★修正：地雷（trap）も物理的な駒として扱い、酔が押し出せるようにする
+  const solidTargets = targets;
 
   if (solidTargets.length > 0) {
     if (pushedGroup.some(p => (PIECE_DEFINITIONS[p.definitionId]?.size?.width || 1) > 1)) {
@@ -85,9 +86,12 @@ export const calculateMovablePositions = (piece: Piece, board: Piece[], turnCoun
   if (!definition) return [];
   if (definition.tags?.includes('requires_turn_5') && turnCount < 5) return [];
   if (definition.tags?.includes('immobilized_if_damaged') && (piece.components?.hp || 2) < 2) return [];
-  
-  // ★新規：白賢が能力使用後の場合は移動不可
   if (definition.tags?.includes('swap_ability') && piece.components?.isExhausted) return [];
+  
+  // ★新規：茸の毒、霊の憑依、盾による移動不可
+  if ((piece.components?.mushroomTimer || 0) > 0) return [];
+  if (piece.definitionId === 'ghost' && piece.components?.possessed) return [];
+  if (piece.definitionId === 'shield' && !piece.components?.inHand) return [];
 
   const movablePositions: Position[] = [];
   const dir = getDirectionMultiplier(piece.owner);

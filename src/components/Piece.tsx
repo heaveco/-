@@ -9,9 +9,11 @@ interface Props { piece: PieceType; inHand?: boolean; currentPlayer: PlayerId; }
 export const Piece: React.FC<Props> = ({ piece, inHand, currentPlayer }) => {
   const def = PIECE_DEFINITIONS[piece.definitionId];
   
-  // ★追加：白賢が行動不能のときは色を暗くする
   const isSageExhausted = piece.definitionId === 'white_sage' && piece.components?.isExhausted;
-  const bgColor = isSageExhausted ? 'bg-gray-600' : (piece.owner === 'player1' ? 'bg-blue-500' : 'bg-red-500');
+  // ★追加：茸の毒による行動不能時の色変化
+  const isPoisoned = (piece.components?.mushroomTimer || 0) > 0;
+  
+  const bgColor = isSageExhausted || isPoisoned ? 'bg-gray-600' : (piece.owner === 'player1' ? 'bg-blue-500' : 'bg-red-500');
   
   if (def?.tags?.includes('invisible_to_enemy') && piece.owner !== currentPlayer && !inHand) {
     return null;
@@ -27,7 +29,11 @@ export const Piece: React.FC<Props> = ({ piece, inHand, currentPlayer }) => {
     displayName = '起爆';
   }
   
-  // ★追加：行動不能になった白賢の文字を画像通り「×」にする
+  // ★追加：霊が憑依している場合の表示
+  if (piece.definitionId === 'ghost' && piece.components?.possessed) {
+    displayName = `霊(${PIECE_DEFINITIONS[piece.components.possessed]?.name || '?'})`;
+  }
+
   if (isSageExhausted) {
     displayName = '×';
   }
@@ -52,6 +58,13 @@ export const Piece: React.FC<Props> = ({ piece, inHand, currentPlayer }) => {
     <div className={`${dimensionClasses} rounded-full flex items-center justify-center text-white font-bold shadow-[0_4px_15px_rgba(0,0,0,0.4)] ${bgColor} transform transition-transform hover:scale-105 text-center p-1 pointer-events-none`}>
       <span className={textSizeClass} style={{ wordBreak: 'keep-all' }}>{displayName}</span>
       
+      {/* ★追加：茸による毒の休眠表示アイコン */}
+      {isPoisoned && (
+        <span className="absolute -top-2 -left-2 bg-purple-700 text-white text-[10px] px-1 py-0.5 rounded-full shadow-lg border border-purple-400 animate-pulse font-bold z-10">
+          🍄{piece.components.mushroomTimer}
+        </span>
+      )}
+
       {piece.components?.hp !== undefined && (
         <span className={`absolute bottom-2 right-2 text-xs px-2 py-0.5 rounded-full border shadow-md ${piece.components.hp === 1 && piece.definitionId === 'twins' ? 'bg-purple-600 border-purple-400 animate-pulse' : 'bg-black border-gray-500'}`}>
           HP:{piece.components.hp}{piece.components.hp === 1 && piece.definitionId === 'twins' ? ' (休)' : ''}

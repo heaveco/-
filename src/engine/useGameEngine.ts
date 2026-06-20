@@ -12,7 +12,8 @@ const INITIAL_KINGS: Piece[] = [
   { id: 'p2_king', definitionId: 'king', owner: 'player2', position: { x: 2, y: 0 }, components: {} },
 ];
 
-const PIECE_POOL = ['pawn', 'silver', 'gold', 'lance', 'rook', 'bishop', 'knight', 'troll', 'trickster', 'wolf', 'hero', 'nuisance', 'bomb', 'landmine', 'bullet', 'drunk', 'renda', 'twins', 'twin_assassin', 'white_sage']; 
+// ★茸、盾、霊を追加
+const PIECE_POOL = ['pawn', 'silver', 'gold', 'lance', 'rook', 'bishop', 'knight', 'troll', 'trickster', 'wolf', 'hero', 'nuisance', 'bomb', 'landmine', 'bullet', 'drunk', 'renda', 'twins', 'twin_assassin', 'white_sage', 'mushroom', 'shield', 'ghost']; 
 const DEMOTE_MAP: Record<string, string> = { 'tokin': 'pawn', 'promoted_silver': 'silver', 'promoted_lance': 'lance', 'promoted_rook': 'rook', 'promoted_bishop': 'bishop', 'promoted_knight': 'knight', 'promoted_trickster': 'trickster', 'promoted_drunk': 'drunk' };
 
 export const WOLF_ROLES = ['pawn', 'silver', 'gold', 'lance', 'knight', 'rook', 'bishop'];
@@ -90,8 +91,6 @@ export const useGameEngine = () => {
   const [rouletteState, setRouletteState] = useState<any>(null);
   const [wolfDeclaration, setWolfDeclaration] = useState<any>(null);
   const [accuseState, setAccuseState] = useState<any>(null);
-
-  // ★新規：白賢の入れ替え能力ステート
   const [swapAbilityState, setSwapAbilityState] = useState<{ pieceId: string; step: 'ask' | 'selecting_target' | 'confirm'; targetPieceId?: string } | null>(null);
 
   const selectedBoardPiece = pieces.find(p => p.id === selectedPieceId);
@@ -100,7 +99,6 @@ export const useGameEngine = () => {
   let movablePositions: Position[] = [];
   if (phase === 'playing' && !pendingPromotion && !winner && !accuseState && !wolfDeclaration && !pendingBombActivation) {
     if (swapAbilityState?.step === 'selecting_target') {
-      // ★入れ替えターゲットの抽出（自陣の1x1駒）
       movablePositions = [];
       const isP1 = currentPlayer === 'player1';
       pieces.forEach(p => {
@@ -108,12 +106,10 @@ export const useGameEngine = () => {
         const def = getEffectiveDefinition(p);
         const w = def?.size?.width || 1;
         const h = def?.size?.height || 1;
-        if (w > 1 || h > 1) return; // 巨大駒は不可
+        if (w > 1 || h > 1) return; 
         
         const inOwnZone = isP1 ? (p.position.y >= 2) : (p.position.y <= 2);
-        if (inOwnZone) {
-          movablePositions.push(p.position);
-        }
+        if (inOwnZone) movablePositions.push(p.position);
       });
     } else if (selectedBoardPiece) {
       movablePositions = calculateMovablePositions(selectedBoardPiece, pieces, turnCount);
@@ -142,12 +138,17 @@ export const useGameEngine = () => {
     let nextBoard = [...currentBoard];
     let newWinner: VictoryResult | null = null;
     
+    // ★茸（毒）の回復と、双子の回復処理
     nextBoard = nextBoard.map(p => {
-      if (p.definitionId === 'twins' && p.owner === nextPlayer && p.components?.hp === 1) {
-        if ((p.components.recoveryTimer || 0) > 0) return { ...p, components: { ...p.components, recoveryTimer: p.components.recoveryTimer - 1 } };
-        else return { ...p, components: { ...p.components, hp: 2 } };
+      let newComps = { ...p.components };
+      if (p.owner === nextPlayer) {
+        if ((newComps.mushroomTimer || 0) > 0) newComps.mushroomTimer -= 1;
+        if (p.definitionId === 'twins' && newComps.hp === 1) {
+          if ((newComps.recoveryTimer || 0) > 0) newComps.recoveryTimer -= 1;
+          else newComps.hp = 2;
+        }
       }
-      return p;
+      return { ...p, components: newComps };
     });
 
     const explodingBombs = nextBoard.filter(p => p.owner === nextPlayer && p.definitionId === 'bomb' && p.components?.isActivated && (p.components.bombTimer || 0) <= 1);
@@ -164,10 +165,26 @@ export const useGameEngine = () => {
         const bx = b.position.x; const by = b.position.y;
         allExAreas.push({x:bx-1, y:by-1}, {x:bx, y:by-1}, {x:bx+1, y:by-1}, {x:bx-1, y:by}, {x:bx, y:by}, {x:bx+1, y:by}, {x:bx-1, y:by+1}, {x:bx, y:by+1}, {x:bx+1, y:by+1});
       });
+      
+      let shieldsToDestroy = new Set<string>();
+      nextBoard.forEach(target => {
+        const tArea = getOccupiedPositions(target);
+        const isHit = tArea.some(tp => allExAreas.some(ep => tp.x === ep.x && tp.y === ep.y));
+        if (isHit && target.definitionId === 'king') {
+          const shield = nextBoard.find(p => p.owner === target.owner && p.definitionId === 'shield' && !shieldsToDestroy.has(p.id));
+          if (shield) shieldsToDestroy.add(shield.id);
+          else newWinner = { winner: target.owner === 'player1' ? 'player2' : 'player1', reason: '爆発により王が消滅しました！' };
+        }
+      });
+      
       nextBoard = nextBoard.filter(target => {
         const tArea = getOccupiedPositions(target);
         const isHit = tArea.some(tp => allExAreas.some(ep => tp.x === ep.x && tp.y === ep.y));
-        if (isHit && target.definitionId === 'king') newWinner = { winner: target.owner === 'player1' ? 'player2' : 'player1', reason: '爆発により王が消滅しました！' };
+        if (shieldsToDestroy.has(target.id)) return false; // 盾消費
+        if (isHit && target.definitionId === 'king') {
+           const shield = nextBoard.find(p => p.owner === target.owner && p.definitionId === 'shield');
+           if (shield) return true; // 盾があれば王は生き残る
+        }
         return !isHit; 
       });
     }
@@ -228,10 +245,7 @@ export const useGameEngine = () => {
       }
 
       if (allyMines.length > 0) {
-        setPendingMineConfirmation({
-          args: [pieceId, to, isDrop, skipTurnChange, wolfMimicRole, newUseCount, allyMines],
-          mineIds: allyMines
-        });
+        setPendingMineConfirmation({ args: [pieceId, to, isDrop, skipTurnChange, wolfMimicRole, newUseCount, allyMines], mineIds: allyMines });
         setPhase('mine_confirm');
         return; 
       }
@@ -322,7 +336,25 @@ export const useGameEngine = () => {
             nextPieces = nextPieces.filter(p => p.id !== target.id && p.id !== steppingPiece?.id);
             if (steppingPiece?.definitionId === 'king') setWinner({ winner: O1 === 'player1' ? 'player2' : 'player1', reason: '玉突きで押し出された王が地雷を踏みました！' });
           } else {
-            if (target.definitionId !== 'twin_assassin') {
+            const steppingPiece = pushedGroup.find(p => getOccupiedPositions({ ...p, position: { x: p.position.x + dx, y: p.position.y + dy } }).some(pos => getOccupiedPositions(target).some(tpos => tpos.x === pos.x && tpos.y === pos.y)));
+            
+            // ★玉突き時の盾身代わり処理
+            if (target.definitionId === 'king') {
+               const shield = nextPieces.find(p => p.owner === target.owner && p.definitionId === 'shield');
+               if (shield) {
+                  nextPieces = nextPieces.filter(p => p.id !== shield.id);
+                  return; 
+               }
+            }
+
+            // ★玉突き時の霊の処理
+            if (target.definitionId === 'ghost' && !target.components?.possessed && steppingPiece) {
+               target.components.possessed = steppingPiece.definitionId;
+               nextPieces = nextPieces.filter(p => p.id !== steppingPiece.id); 
+            } else if (steppingPiece?.definitionId === 'ghost' && !steppingPiece.components?.possessed) {
+               steppingPiece.components.possessed = target.definitionId;
+               nextPieces = nextPieces.filter(p => p.id !== target.id);
+            } else if (target.definitionId !== 'twin_assassin') {
               let captured = { ...target };
               if (captured.definitionId === 'wolf') delete captured.components.mimicRole;
               if (captured.definitionId === 'nuisance') captured.definitionId = 'harm';
@@ -336,8 +368,12 @@ export const useGameEngine = () => {
               if (PIECE_DEFINITIONS[capDef]?.tags?.includes('force_drop_if_captured')) {
                 setMustDropState({ playerId: O1, pieceId: newCapId }); skipTurnChange = false; 
               }
+              // ★茸の毒処理
+              if (PIECE_DEFINITIONS[capDef]?.tags?.includes('poisonous') && steppingPiece) {
+                 steppingPiece.components.mushroomTimer = 2;
+              }
+              nextPieces = nextPieces.filter(p => p.id !== target.id);
             }
-            nextPieces = nextPieces.filter(p => p.id !== target.id);
           }
         });
       }
@@ -439,14 +475,13 @@ export const useGameEngine = () => {
       return;
     }
 
-    // ★新規：白賢のターゲット選択中のクリック
     if (swapAbilityState?.step === 'selecting_target') {
       const clickedPiece = pieces.find(p => getOccupiedPositions(p).some(pos => pos.x === x && pos.y === y));
       if (clickedPiece && clickedPiece.id !== swapAbilityState.pieceId) {
         const def = getEffectiveDefinition(clickedPiece);
         const w = def?.size?.width || 1;
         const h = def?.size?.height || 1;
-        if (w > 1 || h > 1) return; // 巨大駒は不可
+        if (w > 1 || h > 1) return; 
         
         const isP1 = currentPlayer === 'player1';
         const inOwnZone = isP1 ? (clickedPiece.position.y >= 2) : (clickedPiece.position.y <= 2);
@@ -495,7 +530,6 @@ export const useGameEngine = () => {
       if (turnState.isSecondMove && clickedPiece.id !== selectedPieceId) return;
       setSelectedPieceId(clickedPiece.id);
 
-      // ★新規：白の賢人をクリックしたら入れ替え能力のダイアログを開く
       const def = getEffectiveDefinition(clickedPiece);
       if (def?.id === 'white_sage' && !clickedPiece.components?.isExhausted) {
         setSwapAbilityState({ pieceId: clickedPiece.id, step: 'ask' });
@@ -540,7 +574,6 @@ export const useGameEngine = () => {
     }
   };
 
-  // ★新規：白賢の入れ替え能力ダイアログ解決
   const resolveSwapAbility = (answer: string) => {
     if (!swapAbilityState) return;
     if (swapAbilityState.step === 'ask') {
@@ -556,13 +589,11 @@ export const useGameEngine = () => {
         if (sage && target) {
           const sagePos = { ...sage.position };
           const targetPos = { ...target.position };
-          
           let nextPieces = pieces.map(p => {
             if (p.id === sage.id) return { ...p, position: targetPos, components: { ...p.components, isExhausted: true } };
             if (p.id === target.id) return { ...p, position: sagePos };
             return p;
           });
-          
           endCurrentTurn(nextPieces);
           setSelectedPieceId(null);
         }
