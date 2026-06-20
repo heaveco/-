@@ -194,6 +194,7 @@ function App() {
           <p>"双子"のコマ二種につきましては、@MADOguchimoto様の投稿(X:旧Twitter)https://x.gd/fzSC4が本家になります。</p>
           <p>"白の賢人","転移"につきましては、同投稿者様の投稿https://x.gd/srSvcが本家になります。</p>
           <p>上記原作者様達へのリスペクトは前提ですが、コードを弄れる方は、ぜひ自由に改造して遊んだり、より良いものに進化させたりしてください。よろしくお願いいたします。</p>
+          <p>mail:zakkuri.synapse@gmail.com</p>
         </div>
         <div className={`inline-block px-6 py-2 rounded-full font-bold shadow-lg mb-2 ${winner ? 'bg-yellow-500' : swapAbilityState ? 'bg-indigo-600' : phase === 'playing' ? (currentPlayer === 'player1' ? 'bg-blue-600' : 'bg-red-600') : 'bg-gray-600'}`}>{statusText}</div>
         {mustDropState && <div className="text-red-400 font-bold animate-bounce mt-2">⚠️ 迷惑をかけられています！指定の駒を必ず手持ちから出してください！</div>}
