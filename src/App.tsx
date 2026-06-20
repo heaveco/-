@@ -92,6 +92,11 @@ function App() {
     <div className="min-h-screen bg-gray-900 text-white font-sans relative pb-10 overflow-hidden">
       <div className="text-center pt-8">
         <h1 className="text-3xl font-bold mb-2">Custom Board Game</h1>
+        {/* ★ここに確実に見える注意書きを追加★ */}
+        <div className="max-w-xl mx-auto mb-4 px-4 py-2 bg-gray-800 border border-yellow-600 rounded-lg text-xs text-yellow-400 text-left">
+          <p className="font-bold mb-1">⚠️ 二次創作に関するガイドラインへの配慮</p>
+          <p>本ゲームは、オモコロチャンネル様の動画企画「将棋の新弾」を元にした、ファンによる非公式の二次創作（開発途中版）です。公式（株式会社バーグハンバーグバーグ様）とは一切関係ありません。完全非営利で運営されており、権利所有者様からの取り下げ要請があった場合は速やかに公開を停止します。</p>
+        </div>
         <div className={`inline-block px-6 py-2 rounded-full font-bold shadow-lg mb-2 ${winner ? 'bg-yellow-500' : phase === 'playing' ? (currentPlayer === 'player1' ? 'bg-blue-600' : 'bg-red-600') : 'bg-gray-600'}`}>{statusText}</div>
         {mustDropState && <div className="text-red-400 font-bold animate-bounce mt-2">⚠️ 迷惑をかけられています！指定の駒を必ず手持ちから出してください！</div>}
         {turnSkipState[currentPlayer === 'player1' ? 'player2' : 'player1'] && <div className="text-yellow-400 font-bold mb-2 animate-pulse">※相手はペナルティで1回休みです！</div>}
