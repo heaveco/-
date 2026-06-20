@@ -36,9 +36,12 @@ export const PIECE_DEFINITIONS: Record<string, PieceDefinition> = {
 
   // --- 特殊駒（既存） ---
   troll: { id: 'troll', name: 'トロール', size: { width: 2, height: 2 }, tags: ['start_in_hand', 'boss_target'], defaultComponents: { hp: 2 }, moveRules: [{ generator: 'relative', params: [{ dx: 0, dy: -1 }, { dx: 0, dy: 1 }, { dx: -1, dy: 0 }, { dx: 1, dy: 0 }] }] },
-  trickster: { id: 'trickster', name: 'ト⭐︎', tags: ['requires_gamble', 'start_in_hand'], moveRules: [{ generator: 'relative', params: [{ dx: 0, dy: -1 }, { dx: -1, dy: 0 }, { dx: 1, dy: 0 }, { dx: 0, dy: 1 }] }, { generator: 'edge_warp', params: [] }], promotion: { condition: 'in_enemy_zone', promoteTo: 'promoted_trickster' } },
+  
+  // ★修正：手持ちスタートを廃止し、配置フェーズへ
+  trickster: { id: 'trickster', name: 'ト⭐︎', tags: ['requires_gamble'], moveRules: [{ generator: 'relative', params: [{ dx: 0, dy: -1 }, { dx: -1, dy: 0 }, { dx: 1, dy: 0 }, { dx: 0, dy: 1 }] }, { generator: 'edge_warp', params: [] }], promotion: { condition: 'in_enemy_zone', promoteTo: 'promoted_trickster' } },
   promoted_trickster: { id: 'promoted_trickster', name: '⭐︎ト', tags: ['requires_gamble', 'can_spin_roulette'], moveRules: [{ generator: 'relative', params: [{ dx: 0, dy: -1 }, { dx: -1, dy: 0 }, { dx: 1, dy: 0 }, { dx: 0, dy: 1 }] }, { generator: 'edge_warp', params: [] }] },
-  wolf: { id: 'wolf', name: '狼', tags: ['start_in_hand', 'is_wolf'], moveRules: [] },
+  wolf: { id: 'wolf', name: '狼', tags: ['is_wolf'], moveRules: [] },
+  
   hero: { id: 'hero', name: '勇者', tags: ['requires_turn_5'], moveRules: [{ generator: 'relative', params: [{ dx: -1, dy: -1 }, { dx: 0, dy: -1 }, { dx: 1, dy: -1 }, { dx: -1, dy: 0 }, { dx: 1, dy: 0 }, { dx: 0, dy: 1 }] }, { generator: 'edge_warp', params: [] }] },
   nuisance: { id: 'nuisance', name: '迷惑', tags: ['force_drop_if_captured'], moveRules: [{ generator: 'relative', params: [{ dx: -1, dy: -1 }, { dx: 0, dy: -1 }, { dx: 1, dy: -1 }] }] },
   harm: { id: 'harm', name: '成害', tags: ['force_drop_if_captured'], moveRules: [{ generator: 'relative', params: [{ dx: 0, dy: 1 }] }] },
@@ -47,15 +50,29 @@ export const PIECE_DEFINITIONS: Record<string, PieceDefinition> = {
   bullet: { id: 'bullet', name: '弾', tags: ['bullet_minigame', 'start_in_hand'], moveRules: [] },
   drunk: { id: 'drunk', name: '酔', tags: ['pusher', 'cannot_capture'], moveRules: [{ generator: 'straight', params: [{ dx: -1, dy: -1 }, { dx: 1, dy: -1 }, { dx: -1, dy: 1 }, { dx: 1, dy: 1 }] }], promotion: { condition: 'in_enemy_zone', promoteTo: 'promoted_drunk' } },
   promoted_drunk: { id: 'promoted_drunk', name: '成吐', tags: ['pusher', 'cannot_capture'], moveRules: [{ generator: 'straight', params: [{ dx: -1, dy: -1 }, { dx: 1, dy: -1 }, { dx: -1, dy: 1 }, { dx: 1, dy: 1 }] }, { generator: 'relative', params: [{ dx: 0, dy: -1 }, { dx: 0, dy: 1 }, { dx: -1, dy: 0 }, { dx: 1, dy: 0 }] }] },
-  
-  // --- ★新規追加：「連打」 ---
-  renda: {
-    id: 'renda',
-    name: '連打',
-    tags: ['renda_minigame'],
-    defaultComponents: { useCount: 0 },
+  renda: { id: 'renda', name: '連打', tags: ['renda_minigame'], defaultComponents: { useCount: 0 }, moveRules: [{ generator: 'straight', params: [{ dx: -1, dy: -1 }, { dx: 0, dy: -1 }, { dx: 1, dy: -1 }, { dx: -1, dy: 0 }, { dx: 1, dy: 0 }, { dx: -1, dy: 1 }, { dx: 0, dy: 1 }, { dx: 1, dy: 1 }] }] },
+
+  // --- ★新規追加：「双子」と「双暗（双子の暗殺者）」 ---
+  twins: {
+    id: 'twins',
+    name: '双子',
+    size: { width: 2, height: 1 },
+    tags: ['start_in_hand', 'boss_target', 'immobilized_if_damaged'],
+    defaultComponents: { hp: 2 },
+    // 2マスの幅を持つため、左側から見て「左斜め前」「後ろ」、右側から見て「右斜め前」「後ろ」への相対座標を定義
     moveRules: [
-      { generator: 'straight', params: [{ dx: -1, dy: -1 }, { dx: 0, dy: -1 }, { dx: 1, dy: -1 }, { dx: -1, dy: 0 }, { dx: 1, dy: 0 }, { dx: -1, dy: 1 }, { dx: 0, dy: 1 }, { dx: 1, dy: 1 }] }
+      { generator: 'relative', params: [{ dx: -1, dy: -1 }, { dx: 1, dy: -1 }, { dx: 0, dy: 1 }, { dx: 0, dy: 1 }] }
     ]
-  }
+  },
+  twin_assassin: {
+    id: 'twin_assassin',
+    name: '双暗',
+    size: { width: 2, height: 1 },
+    tags: ['start_in_hand', 'split_on_hit'], // 被弾時に分裂する専用タグ
+    // 左斜め前・右斜め前・後ろに移動可能
+    moveRules: [
+      { generator: 'relative', params: [{ dx: -1, dy: -1 }, { dx: 1, dy: -1 }, { dx: 0, dy: 1 }, { dx: 0, dy: 1 }] }
+    ]
+  },
+  loser: { id: 'loser', name: '敗北者', moveRules: [{ generator: 'relative', params: [{ dx: -1, dy: -1 }, { dx: 0, dy: -1 }, { dx: 1, dy: -1 }, { dx: -1, dy: 0 }, { dx: 1, dy: 0 }, { dx: 0, dy: 1 }] }] },
 };

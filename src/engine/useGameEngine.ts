@@ -12,7 +12,7 @@ const INITIAL_KINGS: Piece[] = [
   { id: 'p2_king', definitionId: 'king', owner: 'player2', position: { x: 2, y: 0 }, components: {} },
 ];
 
-const PIECE_POOL = ['pawn', 'silver', 'gold', 'lance', 'rook', 'bishop', 'knight', 'troll', 'trickster', 'wolf', 'hero', 'nuisance', 'bomb', 'landmine', 'bullet', 'drunk', 'renda']; 
+const PIECE_POOL = ['pawn', 'silver', 'gold', 'lance', 'rook', 'bishop', 'knight', 'troll', 'trickster', 'wolf', 'hero', 'nuisance', 'bomb', 'landmine', 'bullet', 'drunk', 'renda', 'twins', 'twin_assassin']; 
 const DEMOTE_MAP: Record<string, string> = { 'tokin': 'pawn', 'promoted_silver': 'silver', 'promoted_lance': 'lance', 'promoted_rook': 'rook', 'promoted_bishop': 'bishop', 'promoted_knight': 'knight', 'promoted_trickster': 'trickster', 'promoted_drunk': 'drunk' };
 
 export const WOLF_ROLES = ['pawn', 'silver', 'gold', 'lance', 'knight', 'rook', 'bishop'];
@@ -81,7 +81,6 @@ export const useGameEngine = () => {
   const [rendaPlayState, setRendaPlayState] = useState<{ clicks: number, required: number, isActive: boolean, timeLeft: number } | null>(null);
 
   const [bulletMinigameData, setBulletMinigameData] = useState<any>(null);
-
   const [pendingMineConfirmation, setPendingMineConfirmation] = useState<{ args: any[], mineIds: string[] } | null>(null);
 
   const [turnState, setTurnState] = useState<{ hasDoubledUp: boolean; isSecondMove: boolean }>({ hasDoubledUp: false, isSecondMove: false });
@@ -124,6 +123,20 @@ export const useGameEngine = () => {
     let nextBoard = [...currentBoard];
     let newWinner: VictoryResult | null = null;
     
+    // ★修正：回復双子の休眠タイマー制御
+    nextBoard = nextBoard.map(p => {
+      if (p.definitionId === 'twins' && p.owner === nextPlayer && p.components?.hp === 1) {
+        if ((p.components.recoveryTimer || 0) > 0) {
+          // 攻撃された直後のターン：タイマーを0に減らし、HPは1のまま（行動不能維持）
+          return { ...p, components: { ...p.components, recoveryTimer: p.components.recoveryTimer - 1 } };
+        } else {
+          // タイマーが0になっている（1度も追加攻撃を受けずに次の自分のターンを迎えた）場合全回復
+          return { ...p, components: { ...p.components, hp: 2 } };
+        }
+      }
+      return p;
+    });
+
     const explodingBombs = nextBoard.filter(p => p.owner === nextPlayer && p.definitionId === 'bomb' && p.components?.isActivated && (p.components.bombTimer || 0) <= 1);
     
     nextBoard = nextBoard.map(p => {
@@ -175,7 +188,6 @@ export const useGameEngine = () => {
     const activeDef = getEffectiveDefinition(activePiece);
     const isPusher = activeDef?.tags?.includes('pusher');
 
-    // ★修正：桂馬ジャンプや端ワープの時に無限ループしないように直線性チェック
     if (!destroyedAllyMineIds) {
       let allyMines: string[] = [];
       if (!isDrop) {
@@ -298,17 +310,19 @@ export const useGameEngine = () => {
             nextPieces = nextPieces.filter(p => p.id !== target.id && p.id !== steppingPiece?.id);
             if (steppingPiece?.definitionId === 'king') setWinner({ winner: O1 === 'player1' ? 'player2' : 'player1', reason: '玉突きで押し出された王が地雷を踏みました！' });
           } else {
-            let captured = { ...target };
-            if (captured.definitionId === 'wolf') delete captured.components.mimicRole;
-            if (captured.definitionId === 'nuisance') captured.definitionId = 'harm';
-            if (captured.definitionId === 'bomb') { captured.components.isActivated = false; captured.components.bombTimer = 0; }
-            
-            const capDef = captured.definitionId;
-            const originalDefId = DEMOTE_MAP[capDef] || capDef;
-            const newCapId = `cap_${Date.now()}_${Math.random()}`;
-            setCapturedPieces(prev => [...prev, { ...captured, owner: O1, definitionId: originalDefId, id: newCapId, components: { ...captured.components, hp: 2 } }]);
-            if (PIECE_DEFINITIONS[capDef]?.tags?.includes('force_drop_if_captured')) {
-              setMustDropState({ playerId: O1, pieceId: newCapId }); skipTurnChange = false; 
+            if (target.definitionId !== 'twin_assassin') {
+              let captured = { ...target };
+              if (captured.definitionId === 'wolf') delete captured.components.mimicRole;
+              if (captured.definitionId === 'nuisance') captured.definitionId = 'harm';
+              if (captured.definitionId === 'bomb') { captured.components.isActivated = false; captured.components.bombTimer = 0; }
+              
+              const capDef = captured.definitionId;
+              const originalDefId = DEMOTE_MAP[capDef] || capDef;
+              const newCapId = `cap_${Date.now()}_${Math.random()}`;
+              setCapturedPieces(prev => [...prev, { ...captured, owner: O1, definitionId: originalDefId, id: newCapId, components: { ...captured.components, hp: 2 } }]);
+              if (PIECE_DEFINITIONS[capDef]?.tags?.includes('force_drop_if_captured')) {
+                setMustDropState({ playerId: O1, pieceId: newCapId }); skipTurnChange = false; 
+              }
             }
             nextPieces = nextPieces.filter(p => p.id !== target.id);
           }
