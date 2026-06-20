@@ -33,7 +33,6 @@ export const resolveCombat = (
       
       for (let i = 0; i < 5; i++) {
         const nextPos = { x: current.x + dx, y: current.y + dy };
-        // ★バグ修正：攻撃者の「全占有マス」がターゲットと重なるか判定
         const myNextArea = getOccupiedPositions({ ...attacker, position: nextPos });
         if (targetArea.some(tp => myNextArea.some(mp => tp.x === mp.x && tp.y === mp.y))) break;
         
@@ -50,13 +49,14 @@ export const resolveCombat = (
       nextBoard = nextBoard.filter(p => p.id !== target.id);
       capturedPiece = { ...target, components: { ...target.components, hp: 2 } }; 
       if (capturedPiece.definitionId === 'wolf') delete capturedPiece.components.mimicRole;
+      if (capturedPiece.definitionId === 'bomb') { capturedPiece.components.isActivated = false; capturedPiece.components.bombTimer = 0; }
     }
   } else {
     nextBoard = nextBoard.filter(p => p.id !== target.id);
     capturedPiece = { ...target, components: { ...target.components } };
     if (capturedPiece.definitionId === 'wolf') delete capturedPiece.components.mimicRole;
+    if (capturedPiece.definitionId === 'bomb') { capturedPiece.components.isActivated = false; capturedPiece.components.bombTimer = 0; }
     
-    // ★新規：迷惑は取られると「成害」になる
     if (capturedPiece.definitionId === 'nuisance') {
       capturedPiece.definitionId = 'harm';
     }

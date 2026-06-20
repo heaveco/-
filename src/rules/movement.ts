@@ -28,7 +28,6 @@ const isPositionInArea = (pos: Position, area: Position[]): boolean => {
   return area.some(p => p.x === pos.x && p.y === pos.y);
 };
 
-// ★新規：酔（玉突き）の押し出し可能判定アルゴリズム
 export const checkPushFeasibility = (pusher: Piece, targetPos: Position, board: Piece[]): boolean => {
   const dx = Math.sign(targetPos.x - pusher.position.x);
   const dy = Math.sign(targetPos.y - pusher.position.y);
@@ -38,9 +37,8 @@ export const checkPushFeasibility = (pusher: Piece, targetPos: Position, board: 
   const pusherArea = getOccupiedPositions(hypotheticalPusher);
   
   let pushedGroup = board.filter(p => p.id !== pusher.id && getOccupiedPositions(p).some(pos => pusherArea.some(pa => pa.x === pos.x && pa.y === pos.y)));
-  if (pushedGroup.length === 0) return true; // 空きマスへの移動
+  if (pushedGroup.length === 0) return true; 
   
-  // 押し出される最初の駒のオーナーを取得し、玉突きグループを拡張する
   const O1 = pushedGroup[0].owner;
   if (pushedGroup.some(p => p.owner !== O1)) return false;
 
@@ -52,20 +50,17 @@ export const checkPushFeasibility = (pusher: Piece, targetPos: Position, board: 
     const nextArea: Position[] = [];
     pushedGroup.forEach(p => getOccupiedPositions({ ...p, position: { x: p.position.x + dx, y: p.position.y + dy } }).forEach(pos => nextArea.push(pos)));
 
-    // 盤面外に出る場合は押し出し不可（壁）
     if (nextArea.some(pos => pos.x < 0 || pos.x > 4 || pos.y < 0 || pos.y > 4)) return false;
 
     const newHits = board.filter(p => p.id !== pusher.id && !groupIds.has(p.id) && getOccupiedPositions(p).some(pos => nextArea.some(na => na.x === pos.x && na.y === pos.y)));
     const alliesInHits = newHits.filter(p => p.owner === O1);
     
-    // 同じオーナーの駒が連なっていればグループに巻き込む
     if (alliesInHits.length > 0) {
       alliesInHits.forEach(p => { pushedGroup.push(p); groupIds.add(p.id); });
       isExpanding = true;
     }
   }
 
-  // グループ全体の移動先に重なるターゲット（敵）を調べる
   const nextArea: Position[] = [];
   pushedGroup.forEach(p => getOccupiedPositions({ ...p, position: { x: p.position.x + dx, y: p.position.y + dy } }).forEach(pos => nextArea.push(pos)));
   const targets = board.filter(p => p.id !== pusher.id && !groupIds.has(p.id) && getOccupiedPositions(p).some(pos => nextArea.some(na => na.x === pos.x && na.y === pos.y)));
@@ -75,7 +70,6 @@ export const checkPushFeasibility = (pusher: Piece, targetPos: Position, board: 
   const solidTargets = targets.filter(t => !PIECE_DEFINITIONS[t.definitionId]?.tags?.includes('trap'));
 
   if (solidTargets.length > 0) {
-    // トロールなどが巻き込まれて2体以上にぶつかる場合は不可とする
     if (pushedGroup.some(p => (PIECE_DEFINITIONS[p.definitionId]?.size?.width || 1) > 1)) {
       if (solidTargets.length >= 2) return false;
     } else {
@@ -112,7 +106,8 @@ export const calculateMovablePositions = (piece: Piece, board: Piece[], turnCoun
           curY += (offset.dy * dir);
           if (curX < 0 || curX > 4 || curY < 0 || curY > 4) break;
           movablePositions.push({ x: curX, y: curY });
-          const isHit = board.some(p => p.id !== piece.id && getOccupiedPositions(p).some(pos => pos.x === curX && pos.y === curY));
+          // ★修正：trap（地雷）は直線移動の障害物とみなさない
+          const isHit = board.some(p => p.id !== piece.id && !PIECE_DEFINITIONS[p.definitionId]?.tags?.includes('trap') && getOccupiedPositions(p).some(pos => pos.x === curX && pos.y === curY));
           if (isHit) break;
         }
       }
@@ -120,7 +115,6 @@ export const calculateMovablePositions = (piece: Piece, board: Piece[], turnCoun
   }
 
   return movablePositions.filter(targetPos => {
-    // ★追加：酔の特殊フィルターを起動
     if (definition.tags?.includes('pusher')) {
       return checkPushFeasibility(piece, targetPos, board);
     }
@@ -132,6 +126,8 @@ export const calculateMovablePositions = (piece: Piece, board: Piece[], turnCoun
 
     const overlappingPieces = board.filter(otherPiece => {
       if (otherPiece.id === piece.id) return false; 
+      // ★修正：trap（地雷）は重なり（移動不可）と判定しない
+      if (PIECE_DEFINITIONS[otherPiece.definitionId]?.tags?.includes('trap')) return false;
       const otherPieceArea = getOccupiedPositions(otherPiece);
       return destinationArea.some(destPos => isPositionInArea(destPos, otherPieceArea));
     });

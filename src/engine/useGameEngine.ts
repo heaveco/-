@@ -17,18 +17,16 @@ const DEMOTE_MAP: Record<string, string> = { 'tokin': 'pawn', 'promoted_silver':
 
 export const WOLF_ROLES = ['pawn', 'silver', 'gold', 'lance', 'knight', 'rook', 'bishop'];
 
-// ★配置フェーズ終了後の動的トランジション解決
 const resolveNextPlacementPhase = (np1: string[], np2: string[], nt1: string[], nt2: string[], board: Piece[], cap: Piece[]) => {
   if (np1.length > 0) return { phase: 'placement_p1', player: 'player1' };
   if (np2.length > 0) return { phase: 'placement_p2', player: 'player2' };
   if (nt1.length > 0) return { phase: 'trap_placement_p1', player: 'player1' };
   if (nt2.length > 0) return { phase: 'trap_placement_p2', player: 'player2' };
   
-  // すべて配置完了したら、連打コマの存在をチェックしてノルマ設定フェーズへ
   const hasP2Renda = board.some(p => p.owner === 'player2' && p.definitionId === 'renda') || cap.some(p => p.owner === 'player2' && p.definitionId === 'renda');
   const hasP1Renda = board.some(p => p.owner === 'player1' && p.definitionId === 'renda') || cap.some(p => p.owner === 'player1' && p.definitionId === 'renda');
   
-  if (hasP2Renda) return { phase: 'renda_quota_p1', player: 'player1' }; // P1がP2の連打ノルマを決める
+  if (hasP2Renda) return { phase: 'renda_quota_p1', player: 'player1' }; 
   if (hasP1Renda) return { phase: 'renda_quota_p2', player: 'player2' };
   
   return { phase: 'playing', player: 'player1' };
@@ -78,16 +76,13 @@ export const useGameEngine = () => {
   const [mustDropState, setMustDropState] = useState<{ playerId: PlayerId; pieceId: string } | null>(null);
   const [pendingBombActivation, setPendingBombActivation] = useState<{ pieceId: string } | null>(null);
 
-  // --- 連打・ルーレット用ステート ---
   const [rendaQuotas, setRendaQuotas] = useState<{ player1: number, player2: number }>({ player1: 3, player2: 3 });
   const [rendaSettingState, setRendaSettingState] = useState<{ clicks: number, isActive: boolean, timeLeft: number } | null>(null);
   const [rendaPlayState, setRendaPlayState] = useState<{ clicks: number, required: number, isActive: boolean, timeLeft: number } | null>(null);
 
-  const [bulletMinigameData, setBulletMinigameData] = useState<{
-    targets: { label: string, pieceId: string | null, startAngle: number, endAngle: number, color: string }[];
-    speed: number;
-    initialOffset: number;
-  } | null>(null);
+  const [bulletMinigameData, setBulletMinigameData] = useState<any>(null);
+
+  const [pendingMineConfirmation, setPendingMineConfirmation] = useState<{ args: any[], mineIds: string[] } | null>(null);
 
   const [turnState, setTurnState] = useState<{ hasDoubledUp: boolean; isSecondMove: boolean }>({ hasDoubledUp: false, isSecondMove: false });
   const [turnSkipState, setTurnSkipState] = useState<{ player1: boolean, player2: boolean }>({ player1: false, player2: false });
@@ -115,7 +110,10 @@ export const useGameEngine = () => {
           }
           const hypo = { ...selectedCapturedPiece, position: { x, y } };
           const area = getOccupiedPositions(hypo);
-          const isOverlap = pieces.some(p => getOccupiedPositions(p).some(ep => area.some(pos => pos.x === ep.x && pos.y === ep.y)));
+          const isOverlap = pieces.some(p => {
+            if (PIECE_DEFINITIONS[p.definitionId]?.tags?.includes('trap')) return false;
+            return getOccupiedPositions(p).some(ep => area.some(pos => pos.x === ep.x && pos.y === ep.y));
+          });
           if (!isOverlap) movablePositions.push({ x, y });
         }
       }
@@ -125,24 +123,29 @@ export const useGameEngine = () => {
   const handleTurnStartEvents = (nextPlayer: PlayerId, currentBoard: Piece[]) => {
     let nextBoard = [...currentBoard];
     let newWinner: VictoryResult | null = null;
-    nextBoard = nextBoard.filter(p => {
-      if (p.owner === nextPlayer && p.components?.isActivated) {
-        const timer = (p.components.bombTimer || 0) - 1;
-        if (timer <= 0) {
-          const exArea = [{x:p.position.x-1,y:p.position.y-1}, {x:p.position.x,y:p.position.y-1}, {x:p.position.x+1,y:p.position.y-1}, {x:p.position.x-1,y:p.position.y}, {x:p.position.x,y:p.position.y}, {x:p.position.x+1,y:p.position.y}, {x:p.position.x-1,y:p.position.y+1}, {x:p.position.x,y:p.position.y+1}, {x:p.position.x+1,y:p.position.y+1}];
-          nextBoard = nextBoard.filter(target => {
-            const tArea = getOccupiedPositions(target);
-            const isHit = tArea.some(tp => exArea.some(ep => tp.x === ep.x && tp.y === ep.y));
-            if (isHit && target.definitionId === 'king') newWinner = { winner: target.owner === 'player1' ? 'player2' : 'player1', reason: '爆発により王が消滅しました！' };
-            return !isHit;
-          });
-          return false;
-        } else {
-          p.components.bombTimer = timer;
-        }
+    
+    const explodingBombs = nextBoard.filter(p => p.owner === nextPlayer && p.definitionId === 'bomb' && p.components?.isActivated && (p.components.bombTimer || 0) <= 1);
+    
+    nextBoard = nextBoard.map(p => {
+      if (p.owner === nextPlayer && p.definitionId === 'bomb' && p.components?.isActivated) {
+        return { ...p, components: { ...p.components, bombTimer: p.components.bombTimer - 1 } };
       }
-      return true;
+      return p;
     });
+
+    if (explodingBombs.length > 0) {
+      let allExAreas: Position[] = [];
+      explodingBombs.forEach(b => {
+        const bx = b.position.x; const by = b.position.y;
+        allExAreas.push({x:bx-1, y:by-1}, {x:bx, y:by-1}, {x:bx+1, y:by-1}, {x:bx-1, y:by}, {x:bx, y:by}, {x:bx+1, y:by}, {x:bx-1, y:by+1}, {x:bx, y:by+1}, {x:bx+1, y:by+1});
+      });
+      nextBoard = nextBoard.filter(target => {
+        const tArea = getOccupiedPositions(target);
+        const isHit = tArea.some(tp => allExAreas.some(ep => tp.x === ep.x && tp.y === ep.y));
+        if (isHit && target.definitionId === 'king') newWinner = { winner: target.owner === 'player1' ? 'player2' : 'player1', reason: '爆発により王が消滅しました！' };
+        return !isHit; 
+      });
+    }
     if (newWinner) setWinner(newWinner);
     return nextBoard;
   };
@@ -163,111 +166,97 @@ export const useGameEngine = () => {
     }
   };
 
-  const executeMove = (pieceId: string, to: Position, isDrop: boolean, skipTurnChange: boolean = false, wolfMimicRole?: string, newUseCount?: number) => {
+  const executeMove = (pieceId: string, to: Position, isDrop: boolean, skipTurnChange: boolean = false, wolfMimicRole?: string, newUseCount?: number, destroyedAllyMineIds?: string[]) => {
     let nextPieces = [...pieces];
     let lastActionData: any = null;
     const activePiece = isDrop ? capturedPieces.find(p => p.id === pieceId) : pieces.find(p => p.id === pieceId);
     if (!activePiece) return;
 
-    let finalTo = to;
-    let hitMineId: string | null = null;
     const activeDef = getEffectiveDefinition(activePiece);
     const isPusher = activeDef?.tags?.includes('pusher');
 
-    if (!isDrop) {
-      const dx = Math.sign(to.x - activePiece.position.x);
-      const dy = Math.sign(to.y - activePiece.position.y);
-      let cx = activePiece.position.x + dx; let cy = activePiece.position.y + dy;
-      if (dx !== 0 || dy !== 0) {
-        while(cx !== to.x || cy !== to.y) {
-          const mine = nextPieces.find(p => p.position.x === cx && p.position.y === cy && PIECE_DEFINITIONS[p.definitionId]?.tags?.includes('trap'));
-          if (mine) { finalTo = { x: cx, y: cy }; hitMineId = mine.id; break; }
-          cx += dx; cy += dy;
-        }
-      }
-      if (!hitMineId) {
-        const mine = nextPieces.find(p => p.position.x === to.x && p.position.y === to.y && PIECE_DEFINITIONS[p.definitionId]?.tags?.includes('trap'));
-        if (mine) hitMineId = mine.id;
-      }
-    }
-
-    if (!isDrop) {
-      if (hitMineId) {
-        nextPieces = nextPieces.filter(p => p.id !== activePiece.id && p.id !== hitMineId);
-        if (activePiece.definitionId === 'king') setWinner({ winner: activePiece.owner === 'player1' ? 'player2' : 'player1', reason: '王が地雷を踏んで爆死しました！' });
-      } else if (isPusher) {
-        const dx = Math.sign(finalTo.x - activePiece.position.x);
-        const dy = Math.sign(finalTo.y - activePiece.position.y);
-        const hypotheticalPusher = { ...activePiece, position: finalTo };
-        const pusherArea = getOccupiedPositions(hypotheticalPusher);
-        let pushedGroup = nextPieces.filter(p => p.id !== activePiece.id && getOccupiedPositions(p).some(pos => pusherArea.some(pa => pa.x === pos.x && pa.y === pos.y)));
-        
-        if (pushedGroup.length > 0) {
-          const O1 = pushedGroup[0].owner; 
-          let groupIds = new Set(pushedGroup.map(p => p.id));
-          let isExpanding = true;
-          while (isExpanding) {
-            isExpanding = false;
-            const nextArea: Position[] = [];
-            pushedGroup.forEach(p => getOccupiedPositions({ ...p, position: { x: p.position.x + dx, y: p.position.y + dy } }).forEach(pos => nextArea.push(pos)));
-            const newHits = nextPieces.filter(p => p.id !== activePiece.id && !groupIds.has(p.id) && getOccupiedPositions(p).some(pos => nextArea.some(na => na.x === pos.x && na.y === pos.y)));
-            const alliesInHits = newHits.filter(p => p.owner === O1);
-            if (alliesInHits.length > 0) { alliesInHits.forEach(p => { pushedGroup.push(p); groupIds.add(p.id); }); isExpanding = true; }
-          }
-          const nextArea: Position[] = [];
-          pushedGroup.forEach(p => getOccupiedPositions({ ...p, position: { x: p.position.x + dx, y: p.position.y + dy } }).forEach(pos => nextArea.push(pos)));
-          const targets = nextPieces.filter(p => p.id !== activePiece.id && !groupIds.has(p.id) && getOccupiedPositions(p).some(pos => nextArea.some(na => na.x === pos.x && na.y === pos.y)));
-          nextPieces = nextPieces.map(p => groupIds.has(p.id) ? { ...p, position: { x: p.position.x + dx, y: p.position.y + dy } } : p);
-
-          targets.forEach(target => {
-            if (PIECE_DEFINITIONS[target.definitionId]?.tags?.includes('trap')) {
-              const steppingPiece = pushedGroup.find(p => getOccupiedPositions({ ...p, position: { x: p.position.x + dx, y: p.position.y + dy } }).some(pos => getOccupiedPositions(target).some(tpos => tpos.x === pos.x && tpos.y === pos.y)));
-              nextPieces = nextPieces.filter(p => p.id !== target.id && p.id !== steppingPiece?.id);
-              if (steppingPiece?.definitionId === 'king') setWinner({ winner: O1 === 'player1' ? 'player2' : 'player1', reason: '玉突きで押し出された王が地雷を踏みました！' });
-            } else {
-              let captured = { ...target };
-              if (captured.definitionId === 'wolf') delete captured.components.mimicRole;
-              if (captured.definitionId === 'nuisance') captured.definitionId = 'harm';
-              const capDef = captured.definitionId;
-              const originalDefId = DEMOTE_MAP[capDef] || capDef;
-              const newCapId = `cap_${Date.now()}_${Math.random()}`;
-              setCapturedPieces(prev => [...prev, { ...captured, owner: O1, definitionId: originalDefId, id: newCapId, components: { ...captured.components, hp: 2 } }]);
-              if (PIECE_DEFINITIONS[capDef]?.tags?.includes('force_drop_if_captured')) {
-                setMustDropState({ playerId: O1, pieceId: newCapId }); skipTurnChange = false; 
-              }
-              nextPieces = nextPieces.filter(p => p.id !== target.id);
-            }
-          });
-        }
-        nextPieces = nextPieces.map(p => p.id === activePiece.id ? { ...p, position: finalTo } : p);
-        lastActionData = { type: 'move' };
-      } else {
-        let targetPiece = undefined;
-        for (const p of nextPieces) {
-          if (p.owner !== currentPlayer) {
-            const targetArea = getOccupiedPositions(p);
-            const myDestArea = getOccupiedPositions({ ...activePiece, position: finalTo });
-            if (myDestArea.some(dp => targetArea.some(tp => tp.x === dp.x && tp.y === dp.y))) { targetPiece = p; break; }
-          }
-        }
-        if (targetPiece) {
-          const combatResult = resolveCombat(activePiece, targetPiece, finalTo, nextPieces);
-          if (combatResult.capturedPiece) {
-            const capDef = combatResult.capturedPiece.definitionId;
-            const originalDefId = DEMOTE_MAP[capDef] || capDef;
-            const newCapId = `cap_${Date.now()}_${Math.random()}`;
-            setCapturedPieces(prev => [...prev, { ...combatResult.capturedPiece!, owner: currentPlayer, definitionId: originalDefId, id: newCapId }]);
-            if (PIECE_DEFINITIONS[capDef]?.tags?.includes('force_drop_if_captured')) {
-              setMustDropState({ playerId: currentPlayer, pieceId: newCapId }); skipTurnChange = false; 
+    // ★修正：桂馬ジャンプや端ワープの時に無限ループしないように直線性チェック
+    if (!destroyedAllyMineIds) {
+      let allyMines: string[] = [];
+      if (!isDrop) {
+        const diffX = to.x - activePiece.position.x;
+        const diffY = to.y - activePiece.position.y;
+        const isLinearPath = (diffX === 0 || diffY === 0 || Math.abs(diffX) === Math.abs(diffY)) && 
+                             activeDef?.id !== 'knight' && 
+                             !(activeDef?.moveRules.some((r: any) => r.generator === 'edge_warp') && (Math.abs(diffX) === 4 || Math.abs(diffY) === 4));
+                             
+        if (isLinearPath) {
+          const dx = Math.sign(diffX);
+          const dy = Math.sign(diffY);
+          let cx = activePiece.position.x + dx; let cy = activePiece.position.y + dy;
+          if (dx !== 0 || dy !== 0) {
+            while(cx !== to.x || cy !== to.y) {
+              const mine = nextPieces.find(p => p.position.x === cx && p.position.y === cy && PIECE_DEFINITIONS[p.definitionId]?.tags?.includes('trap'));
+              if (mine && mine.owner === currentPlayer) allyMines.push(mine.id);
+              cx += dx; cy += dy;
             }
           }
-          nextPieces = combatResult.nextBoard;
-        } else {
-          nextPieces = nextPieces.map(p => p.id === activePiece.id ? { ...p, position: finalTo, components: { ...p.components, useCount: newUseCount ?? p.components.useCount } } : p);
         }
-        lastActionData = { type: 'move' };
+      }
+      const destMine = nextPieces.find(p => p.position.x === to.x && p.position.y === to.y && PIECE_DEFINITIONS[p.definitionId]?.tags?.includes('trap'));
+      if (destMine && destMine.owner === currentPlayer && !allyMines.includes(destMine.id)) {
+        allyMines.push(destMine.id);
+      }
+
+      if (allyMines.length > 0) {
+        setPendingMineConfirmation({
+          args: [pieceId, to, isDrop, skipTurnChange, wolfMimicRole, newUseCount, allyMines],
+          mineIds: allyMines
+        });
+        setPhase('mine_confirm');
+        return; 
       }
     } else {
+      nextPieces = nextPieces.filter(p => !destroyedAllyMineIds.includes(p.id));
+    }
+
+    let finalTo = to;
+    let hitMineId: string | null = null;
+
+    if (!isDrop) {
+      const diffX = to.x - activePiece.position.x;
+      const diffY = to.y - activePiece.position.y;
+      const isLinearPath = (diffX === 0 || diffY === 0 || Math.abs(diffX) === Math.abs(diffY)) && 
+                           activeDef?.id !== 'knight' && 
+                           !(activeDef?.moveRules.some((r: any) => r.generator === 'edge_warp') && (Math.abs(diffX) === 4 || Math.abs(diffY) === 4));
+
+      if (isLinearPath) {
+        const dx = Math.sign(diffX);
+        const dy = Math.sign(diffY);
+        let cx = activePiece.position.x + dx; let cy = activePiece.position.y + dy;
+        if (dx !== 0 || dy !== 0) {
+          while(cx !== to.x || cy !== to.y) {
+            const mine = nextPieces.find(p => p.position.x === cx && p.position.y === cy && PIECE_DEFINITIONS[p.definitionId]?.tags?.includes('trap'));
+            if (mine) { finalTo = { x: cx, y: cy }; hitMineId = mine.id; break; }
+            cx += dx; cy += dy;
+          }
+        }
+      }
+    }
+    
+    if (!hitMineId) {
+      const mine = nextPieces.find(p => p.position.x === finalTo.x && p.position.y === finalTo.y && PIECE_DEFINITIONS[p.definitionId]?.tags?.includes('trap'));
+      if (mine) hitMineId = mine.id;
+    }
+
+    if (hitMineId) {
+      if (isDrop) {
+        setCapturedPieces(prev => prev.filter(p => p.id !== pieceId));
+        nextPieces = nextPieces.filter(p => p.id !== hitMineId);
+        if (activePiece.definitionId === 'king') setWinner({ winner: activePiece.owner === 'player1' ? 'player2' : 'player1', reason: '王が地雷の上に置かれて爆死しました！' });
+        if (mustDropState?.pieceId === pieceId) setMustDropState(null);
+        lastActionData = { type: 'drop', definitionId: activePiece.definitionId, x: finalTo.x };
+      } else {
+        nextPieces = nextPieces.filter(p => p.id !== activePiece.id && p.id !== hitMineId);
+        if (activePiece.definitionId === 'king') setWinner({ winner: activePiece.owner === 'player1' ? 'player2' : 'player1', reason: '王が地雷を踏んで爆死しました！' });
+        lastActionData = { type: 'move' };
+      }
+    } else if (isDrop) {
       setCapturedPieces(prev => prev.filter(p => p.id !== pieceId));
       const newPiece = { ...activePiece, position: finalTo };
       if (wolfMimicRole) newPiece.components.mimicRole = wolfMimicRole;
@@ -275,9 +264,87 @@ export const useGameEngine = () => {
       nextPieces = [...nextPieces, newPiece];
       lastActionData = { type: 'drop', definitionId: newPiece.definitionId, x: finalTo.x };
       if (mustDropState?.pieceId === pieceId) setMustDropState(null); 
+    } else if (isPusher) {
+      const dx = Math.sign(finalTo.x - activePiece.position.x);
+      const dy = Math.sign(finalTo.y - activePiece.position.y);
+      const hypotheticalPusher = { ...activePiece, position: finalTo };
+      const pusherArea = getOccupiedPositions(hypotheticalPusher);
+      let pushedGroup = nextPieces.filter(p => p.id !== activePiece.id && getOccupiedPositions(p).some(pos => pusherArea.some(pa => pa.x === pos.x && pa.y === pos.y)));
+      
+      if (pushedGroup.length > 0) {
+        const O1 = pushedGroup[0].owner; 
+        let groupIds = new Set(pushedGroup.map(p => p.id));
+        let isExpanding = true;
+        while (isExpanding) {
+          isExpanding = false;
+          const nextArea: Position[] = [];
+          pushedGroup.forEach(p => getOccupiedPositions({ ...p, position: { x: p.position.x + dx, y: p.position.y + dy } }).forEach(pos => nextArea.push(pos)));
+          const newHits = nextPieces.filter(p => p.id !== activePiece.id && !groupIds.has(p.id) && getOccupiedPositions(p).some(pos => nextArea.some(na => na.x === pos.x && na.y === pos.y)));
+          const alliesInHits = newHits.filter(p => p.owner === O1);
+          if (alliesInHits.length > 0) { alliesInHits.forEach(p => { pushedGroup.push(p); groupIds.add(p.id); }); isExpanding = true; }
+        }
+        const nextArea: Position[] = [];
+        pushedGroup.forEach(p => getOccupiedPositions({ ...p, position: { x: p.position.x + dx, y: p.position.y + dy } }).forEach(pos => nextArea.push(pos)));
+        const targets = nextPieces.filter(p => p.id !== activePiece.id && !groupIds.has(p.id) && getOccupiedPositions(p).some(pos => nextArea.some(na => na.x === pos.x && na.y === pos.y)));
+
+        nextPieces = nextPieces.map(p => {
+          if (groupIds.has(p.id)) return { ...p, position: { x: p.position.x + dx, y: p.position.y + dy } };
+          return p;
+        });
+
+        targets.forEach(target => {
+          if (PIECE_DEFINITIONS[target.definitionId]?.tags?.includes('trap')) {
+            const steppingPiece = pushedGroup.find(p => getOccupiedPositions({ ...p, position: { x: p.position.x + dx, y: p.position.y + dy } }).some(pos => getOccupiedPositions(target).some(tpos => tpos.x === pos.x && tpos.y === pos.y)));
+            nextPieces = nextPieces.filter(p => p.id !== target.id && p.id !== steppingPiece?.id);
+            if (steppingPiece?.definitionId === 'king') setWinner({ winner: O1 === 'player1' ? 'player2' : 'player1', reason: '玉突きで押し出された王が地雷を踏みました！' });
+          } else {
+            let captured = { ...target };
+            if (captured.definitionId === 'wolf') delete captured.components.mimicRole;
+            if (captured.definitionId === 'nuisance') captured.definitionId = 'harm';
+            if (captured.definitionId === 'bomb') { captured.components.isActivated = false; captured.components.bombTimer = 0; }
+            
+            const capDef = captured.definitionId;
+            const originalDefId = DEMOTE_MAP[capDef] || capDef;
+            const newCapId = `cap_${Date.now()}_${Math.random()}`;
+            setCapturedPieces(prev => [...prev, { ...captured, owner: O1, definitionId: originalDefId, id: newCapId, components: { ...captured.components, hp: 2 } }]);
+            if (PIECE_DEFINITIONS[capDef]?.tags?.includes('force_drop_if_captured')) {
+              setMustDropState({ playerId: O1, pieceId: newCapId }); skipTurnChange = false; 
+            }
+            nextPieces = nextPieces.filter(p => p.id !== target.id);
+          }
+        });
+      }
+      nextPieces = nextPieces.map(p => p.id === activePiece.id ? { ...p, position: finalTo } : p);
+      lastActionData = { type: 'move' };
+    } else {
+      let targetPiece = undefined;
+      for (const p of nextPieces) {
+        if (p.owner !== currentPlayer) {
+          const targetArea = getOccupiedPositions(p);
+          const myDestArea = getOccupiedPositions({ ...activePiece, position: finalTo });
+          if (myDestArea.some(dp => targetArea.some(tp => tp.x === dp.x && tp.y === dp.y))) { targetPiece = p; break; }
+        }
+      }
+      if (targetPiece) {
+        const combatResult = resolveCombat(activePiece, targetPiece, finalTo, nextPieces);
+        if (combatResult.capturedPiece) {
+          const capDef = combatResult.capturedPiece.definitionId;
+          const originalDefId = DEMOTE_MAP[capDef] || capDef;
+          const newCapId = `cap_${Date.now()}_${Math.random()}`;
+          setCapturedPieces(prev => [...prev, { ...combatResult.capturedPiece!, owner: currentPlayer, definitionId: originalDefId, id: newCapId }]);
+          if (PIECE_DEFINITIONS[capDef]?.tags?.includes('force_drop_if_captured')) {
+            setMustDropState({ playerId: currentPlayer, pieceId: newCapId }); skipTurnChange = false; 
+          }
+        }
+        nextPieces = combatResult.nextBoard;
+      } else {
+        nextPieces = nextPieces.map(p => p.id === activePiece.id ? { ...p, position: finalTo, components: { ...p.components, useCount: newUseCount ?? p.components.useCount } } : p);
+      }
+      lastActionData = { type: 'move' };
     }
 
     setPieces(nextPieces);
+
     const victoryResult = evaluateVictoryConditions(nextPieces, currentPlayer, lastActionData);
     if (victoryResult) { setSelectedPieceId(null); setWinner(victoryResult); return; }
 
@@ -298,12 +365,19 @@ export const useGameEngine = () => {
         else { setSelectedPieceId(activePiece.id); setTurnState(prev => ({ ...prev, isSecondMove: true })); }
       }
     };
-    if (isBomb && !hitMineId) { setPendingBombActivation({ pieceId: activePiece.id }); setPhase('bomb_activation'); } 
-    else { finalizeMove(); }
+
+    if (isBomb && !hitMineId) { 
+      setPendingBombActivation({ pieceId: activePiece.id }); 
+      setPhase('bomb_activation'); 
+    } 
+    else { 
+      finalizeMove(); 
+      setPhase('playing');
+    }
   };
 
   const handleCellClick = (x: number, y: number) => {
-    if (wolfDeclaration || accuseState || pendingPromotion || winner || pendingBombActivation) return;
+    if (wolfDeclaration || accuseState || pendingPromotion || winner || pendingBombActivation || pendingMineConfirmation) return;
     if (phase.startsWith('placement') || phase.startsWith('trap_placement')) {
       const activePlayer = phase.includes('p1') ? 'player1' : 'player2';
       const isTrapPhase = phase.startsWith('trap');
@@ -351,7 +425,6 @@ export const useGameEngine = () => {
       
       if (activeDef?.tags?.includes('requires_gamble') && !turnState.isSecondMove) { setPendingAction({ pieceId: activePiece.id, to: chosenAnchor, isDrop: !!selectedCapturedPiece }); setChohanState(null); setPhase('minigame_chohan'); return; }
       
-      // ★新規：連打コマの移動判定
       if (activeDef?.tags?.includes('renda_minigame')) {
         const dist = !!selectedCapturedPiece ? 1 : Math.max(Math.abs(chosenAnchor.x - activePiece.position.x), Math.abs(chosenAnchor.y - activePiece.position.y));
         const req = dist * (rendaQuotas[currentPlayer] + (activePiece.components.useCount || 0));
@@ -380,7 +453,6 @@ export const useGameEngine = () => {
     }
   };
 
-  // --- ★ダーツ生成ロジックの変更 ---
   const startBulletMinigame = (bulletPieceId: string) => {
     setSelectedPieceId(bulletPieceId);
     const enemies = pieces.filter(p => p.owner !== currentPlayer);
@@ -388,7 +460,7 @@ export const useGameEngine = () => {
     let cAngle = 0;
     const absoluteTargets: any[] = [];
     enemies.forEach(enemy => {
-      const hitW = Math.floor(Math.random() * 18) + 18; // 5~10% (18~36度)
+      const hitW = Math.floor(Math.random() * 18) + 18; 
       const missW = (360 / enemies.length) - hitW;
       
       absoluteTargets.push({ label: PIECE_DEFINITIONS[enemy.definitionId]?.name || '?', pieceId: enemy.id, startAngle: cAngle, endAngle: cAngle + hitW, color: '#ef4444' });
@@ -400,14 +472,14 @@ export const useGameEngine = () => {
 
     setBulletMinigameData({
       targets: absoluteTargets,
-      speed: Math.floor(Math.random() * 400) + 300, // 300~700度/秒
+      speed: Math.floor(Math.random() * 400) + 300, 
       initialOffset: Math.random() * 360
     });
     setPhase('minigame_bullet');
   };
 
   const handleCapturedClick = (pieceId: string) => {
-    if (phase !== 'playing' || pendingPromotion || winner || turnState.isSecondMove || wolfDeclaration || accuseState || pendingBombActivation) return;
+    if (phase !== 'playing' || pendingPromotion || winner || turnState.isSecondMove || wolfDeclaration || accuseState || pendingBombActivation || pendingMineConfirmation) return;
     if (mustDropState?.playerId === currentPlayer && pieceId !== mustDropState.pieceId) return;
 
     const target = capturedPieces.find(p => p.id === pieceId);
@@ -417,13 +489,23 @@ export const useGameEngine = () => {
     }
   };
 
-  // --- ★連打のアクション群 ---
+  const resolveMineConfirmation = (proceed: boolean) => {
+    if (!pendingMineConfirmation) return;
+    if (proceed) {
+      executeMove(...(pendingMineConfirmation.args as any));
+    } else {
+      setPhase('playing');
+      setSelectedPieceId(null);
+    }
+    setPendingMineConfirmation(null);
+  };
+
   const startRendaSetting = () => setRendaSettingState({ clicks: 0, isActive: true, timeLeft: 5 });
   const clickRendaSetting = () => setRendaSettingState(prev => prev && prev.isActive ? { ...prev, clicks: prev.clicks + 1 } : null);
   const tickRendaSetting = () => setRendaSettingState(prev => prev ? { ...prev, timeLeft: prev.timeLeft - 1 } : null);
   const finishRendaSetting = () => {
     if (!rendaSettingState) return;
-    const finalClicks = Math.max(1, rendaSettingState.clicks); // 最低1回
+    const finalClicks = Math.max(1, rendaSettingState.clicks); 
     if (phase === 'renda_quota_p1') {
       setRendaQuotas(prev => ({ ...prev, player2: finalClicks }));
       const hasP1Renda = pieces.some(p => p.owner === 'player1' && p.definitionId === 'renda') || capturedPieces.some(p => p.owner === 'player1' && p.definitionId === 'renda');
@@ -446,11 +528,10 @@ export const useGameEngine = () => {
       const newUseCount = (activePiece?.components.useCount || 0) + 1;
       executeMove(pendingAction.pieceId, pendingAction.to, pendingAction.isDrop, false, undefined, newUseCount);
     } else {
-      endCurrentTurn(pieces); setSelectedPieceId(null);
+      endCurrentTurn(pieces); setPhase('playing'); setSelectedPieceId(null);
     }
-    setRendaPlayState(null); setPendingAction(null); setPhase('playing');
+    setRendaPlayState(null); setPendingAction(null); 
   };
-  // -------------------------
 
   const resolveBombActivation = (activate: boolean) => {
     if (!pendingBombActivation) return;
@@ -514,9 +595,13 @@ export const useGameEngine = () => {
   const closeAccusationResult = () => { if (accuseState?.isSuccess === false) endCurrentTurn(pieces); setAccuseState(null); };
 
   const playChohan = (guess: 'cho'|'han', isD: boolean = false) => { const isWin = ((Math.floor(Math.random()*6)+1 + Math.floor(Math.random()*6)+1) % 2 === 0) === (guess === 'cho'); setChohanState({ dice1: 1, dice2: 2, isWin, isDoubleUpAttempt: isD }); if (isD) setTurnState(prev => ({ ...prev, hasDoubledUp: true })); };
+  
   const resolveChohan = (proceed: boolean) => {
     if (!pendingAction) return;
-    if (proceed && chohanState?.isWin) { executeMove(pendingAction.pieceId, pendingAction.to, pendingAction.isDrop, chohanState.isDoubleUpAttempt); setPhase('playing'); setPendingAction(null); }
+    if (proceed && chohanState?.isWin) { 
+      executeMove(pendingAction.pieceId, pendingAction.to, pendingAction.isDrop, chohanState.isDoubleUpAttempt); 
+      setPendingAction(null); 
+    }
     else { endCurrentTurn(pieces); setPhase('playing'); setPendingAction(null); setSelectedPieceId(null); }
   };
 
@@ -525,7 +610,7 @@ export const useGameEngine = () => {
 
   const resetGame = () => {
     const s = initGame(); setPieces(INITIAL_KINGS); setCapturedPieces(s.cap); setP1Queue(s.p1Q); setP2Queue(s.p2Q); setP1TrapQueue(s.p1TrapQ); setP2TrapQueue(s.p2TrapQ);
-    setPhase(s.initialPhase as any); setCurrentPlayer('player1'); setSelectedPieceId(null); setWinner(null); setPendingPromotion(null); setTurnState({ hasDoubledUp: false, isSecondMove: false }); setTurnSkipState({ player1: false, player2: false }); setTurnCount(1); setMustDropState(null); setBulletMinigameData(null);
+    setPhase(s.initialPhase as any); setCurrentPlayer('player1'); setSelectedPieceId(null); setWinner(null); setPendingPromotion(null); setTurnState({ hasDoubledUp: false, isSecondMove: false }); setTurnSkipState({ player1: false, player2: false }); setTurnCount(1); setMustDropState(null); setBulletMinigameData(null); setPendingMineConfirmation(null);
   };
 
   const visiblePieces = pieces.filter(p => phase === 'placement_p1' ? p.owner === 'player1' : phase === 'placement_p2' ? p.owner === 'player2' : true);
@@ -533,9 +618,9 @@ export const useGameEngine = () => {
   return {
     phase, pieces: visiblePieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, movablePositions, pendingPromotion, winner,
     chohanState, rouletteState, turnState, turnSkipState, wolfDeclaration, accuseState, WOLF_ROLES, turnCount, mustDropState, pendingBombActivation, bulletMinigameData,
-    rendaQuotas, rendaSettingState, rendaPlayState,
+    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation,
     handleCellClick, handleCapturedClick, resolvePromotion, resolveWolfDeclaration, resetGame,
     proceedAccusation, cancelAccusation, resolveAccusation, closeAccusationResult, playChohan, resolveChohan, startRoulette, resolveRoulette, resolveBombActivation, resolveBullet,
-    startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay
+    startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation
   };
 };

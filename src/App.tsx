@@ -11,18 +11,16 @@ function App() {
     phase, pieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, movablePositions, 
     handleCellClick, handleCapturedClick, pendingPromotion, winner, resetGame,
     chohanState, rouletteState, turnState, turnSkipState, wolfDeclaration, accuseState, turnCount, mustDropState, pendingBombActivation, bulletMinigameData,
-    rendaQuotas, rendaSettingState, rendaPlayState,
+    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation,
     resolvePromotion, resolveWolfDeclaration, proceedAccusation, cancelAccusation, resolveAccusation, closeAccusationResult, 
     playChohan, resolveChohan, startRoulette, resolveRoulette, resolveBombActivation, resolveBullet,
-    startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay
+    startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation
   } = useGameEngine();
 
-  // --- ダーツ・ルーレット用ステート ---
   const [rotationAngle, setRotationAngle] = useState(0);
   const [isSpinning, setIsSpinning] = useState(false);
   const [bulletResult, setBulletResult] = useState<{ targetId: string | null, label: string } | null>(null);
 
-  // ダーツの開始検知
   useEffect(() => {
     if (phase === 'minigame_bullet' && bulletMinigameData) {
       setRotationAngle(0);
@@ -31,7 +29,6 @@ function App() {
     }
   }, [phase, bulletMinigameData]);
 
-  // ダーツの回転アニメーション
   useEffect(() => {
     let animFrame: number;
     let lastTime = performance.now();
@@ -59,7 +56,6 @@ function App() {
     }
   };
 
-  // --- 連打タイマー制御 ---
   useEffect(() => {
     let timerId: any;
     if (phase === 'renda_quota_p1' || phase === 'renda_quota_p2') {
@@ -72,7 +68,6 @@ function App() {
     return () => clearInterval(timerId);
   }, [phase, rendaSettingState?.isActive, rendaSettingState?.timeLeft, rendaPlayState?.isActive, rendaPlayState?.timeLeft]);
 
-  // --- テキスト生成 ---
   let statusText = '';
   if (winner) statusText = 'ゲーム終了！';
   else if (phase === 'placement_p1') statusText = '【配置】Player 1 (青) : 一番手前の列に駒を置いてください';
@@ -144,13 +139,39 @@ function App() {
         </div>
       </div>
 
-      {/* --- 新規：連打ノルマ設定フェーズUI --- */}
+      {/* --- ★新規：味方の地雷通過・配置確認ダイアログ --- */}
+      {phase === 'mine_confirm' && pendingMineConfirmation && (
+        <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
+          <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-2 border-yellow-500 max-w-md w-full">
+            <h2 className="text-3xl font-bold mb-4 text-yellow-400">⚠️ 味方の地雷</h2>
+            <p className="mb-6 text-gray-300 text-lg">進行方向に味方の地雷があります。<br/>通過・配置すると地雷は破壊されますが、よろしいですか？</p>
+            <div className="flex gap-4 justify-center">
+              <button onClick={() => resolveMineConfirmation(true)} className="px-6 py-3 bg-red-600 hover:bg-red-500 rounded font-bold text-lg">はい（破壊して進む）</button>
+              <button onClick={() => resolveMineConfirmation(false)} className="px-6 py-3 bg-gray-600 hover:bg-gray-500 rounded font-bold text-lg">やめる</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- ★復活：運命のルーレットダイアログ --- */}
+      {phase === 'minigame_roulette' && (
+        <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
+          <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-2 border-purple-500 max-w-md w-full">
+            <h2 className="text-3xl font-bold mb-6 text-purple-400">運命のルーレット</h2>
+            <div className="mb-8">
+              {rouletteState === 'win' && <div className="text-4xl animate-bounce">🎊 特殊勝利 🎊</div>}
+              {rouletteState === 'lose' && <div className="text-4xl text-red-500 animate-pulse">💀 特殊敗北 💀</div>}
+              {rouletteState === 'miss' && <div className="text-4xl text-gray-400">💨 はずれ（ターン終了）</div>}
+            </div>
+            <button onClick={resolveRoulette} className="px-8 py-3 bg-blue-600 hover:bg-blue-500 rounded font-bold w-full">結果を受け入れる</button>
+          </div>
+        </div>
+      )}
+
       {(phase === 'renda_quota_p1' || phase === 'renda_quota_p2') && (
         <div className="absolute inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50">
           <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-4 border-purple-500 max-w-md w-full">
-            <h2 className={`text-3xl font-bold mb-4 ${phase==='renda_quota_p1' ? 'text-blue-400' : 'text-red-400'}`}>
-              連打妨害！
-            </h2>
+            <h2 className={`text-3xl font-bold mb-4 ${phase==='renda_quota_p1' ? 'text-blue-400' : 'text-red-400'}`}>連打妨害！</h2>
             <p className="mb-4 text-gray-300">相手の「連打コマ」の必要ノルマを決めることができます。<br/>5秒間で連打した回数が、1マスあたりの必要回数になります！</p>
             {!rendaSettingState ? (
               <button onClick={startRendaSetting} className="w-full py-4 bg-purple-600 hover:bg-purple-500 rounded font-bold text-2xl animate-pulse">準備完了 (5秒スタート)</button>
@@ -169,7 +190,6 @@ function App() {
         </div>
       )}
 
-      {/* --- 新規：連打プレイ時UI --- */}
       {phase === 'minigame_renda_play' && rendaPlayState && (
         <div className="absolute inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50">
           <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-4 border-yellow-500 max-w-md w-full">
@@ -204,7 +224,6 @@ function App() {
         </div>
       )}
 
-      {/* --- 変更：ダーツ型 弾ルーレットダイアログ --- */}
       {phase === 'minigame_bullet' && bulletMinigameData && (
         <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
           <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-2 border-blue-500 max-w-md w-full">
@@ -252,7 +271,6 @@ function App() {
         </div>
       )}
 
-      {/* 以下、既存のダイアログ群 */}
       {phase === 'bomb_activation' && (
         <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
           <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-2 border-yellow-500 max-w-md w-full">
