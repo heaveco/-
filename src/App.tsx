@@ -97,8 +97,9 @@ function App() {
         <div className="max-w-xl mx-auto mb-4 px-4 py-2 bg-gray-800 border border-yellow-600 rounded-lg text-xs text-yellow-400 text-left">
           <p className="font-bold mb-1">⚠️ 二次創作に関するガイドラインへの配慮</p>
           <p>本ゲームは、オモコロチャンネル様の動画企画「将棋の新弾」を元にした、ファンによる非公式の二次創作（開発途中版）です。公式（株式会社バーグハンバーグバーグ様）とは一切関係ありません。完全非営利で運営されており、権利所有者様からの取り下げ要請があった場合は速やかに公開を停止します。</p>
-          <p>"双子"のコマ二種につきましては、@MADOguchimoto様の投稿https://x.gd/fzSC4が本家になります。</p>
+          <p>"双子"のコマ二種につきましては、@MADOguchimoto様の投稿(X:旧Twitter)https://x.gd/fzSC4が本家になります。</p>
           <p>"白の賢人"につきましては、同投稿者様の投稿https://x.gd/srSvcが本家になります。</p>
+          <p>上記原作者様達へのリスペクトは前提ですが、コードを弄れる方は、ぜひ自由に改造して遊んだり、より良いものに進化させたりしてください。よろしくお願いいたします。</p>
         </div>
         <div className={`inline-block px-6 py-2 rounded-full font-bold shadow-lg mb-2 ${winner ? 'bg-yellow-500' : swapAbilityState ? 'bg-indigo-600' : phase === 'playing' ? (currentPlayer === 'player1' ? 'bg-blue-600' : 'bg-red-600') : 'bg-gray-600'}`}>{statusText}</div>
         {mustDropState && <div className="text-red-400 font-bold animate-bounce mt-2">⚠️ 迷惑をかけられています！指定の駒を必ず手持ちから出してください！</div>}
