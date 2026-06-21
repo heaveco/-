@@ -26,6 +26,10 @@ const WaitingForOpponent = ({ title, actionName }: { title: string, actionName: 
 function App() {
   const [appState, setAppState] = useState<'menu' | 'local' | 'online_menu' | 'online_playing'>('menu');
   const [roomIdInput, setRoomIdInput] = useState('');
+  
+  // ★新規追加：現在実際に接続している「本当の部屋ID」を記憶する箱（野良対戦のランダムIDを保存するため）
+  const [activeRoomId, setActiveRoomId] = useState(''); 
+  
   const [useTimerToggle, setUseTimerToggle] = useState(false);
   const [onlineStatusMsg, setOnlineStatusMsg] = useState(''); 
   const [myPlayerId, setMyPlayerId] = useState<'player1' | 'player2' | null>(null);
@@ -33,6 +37,7 @@ function App() {
   const [placementTimer, setPlacementTimer] = useState<number | null>(null);
   const [turnTimer, setTurnTimer] = useState<number | null>(null); 
 
+  // ★変更：エンジンには roomIdInput ではなく、実際の接続先である activeRoomId を渡す！
   const { 
     phase, pieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, movablePositions, pendingPromotion, winner, resetGame,
     chohanState, rouletteState, turnState, turnSkipState, wolfDeclaration, accuseState, turnCount, mustDropState, pendingBombActivation, bulletMinigameData,
@@ -40,7 +45,7 @@ function App() {
     handleCellClick, handleCapturedClick, resolvePromotion, resolveWolfDeclaration, proceedAccusation, cancelAccusation, resolveAccusation, closeAccusationResult, 
     playChohan, resolveChohan, startRoulette, resolveRoulette, resolveBombActivation, resolveBullet,
     startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation, resolveSwapAbility, resolveGambleJump, cancelGambleJump
-  } = useGameEngine(appState, roomIdInput, myPlayerId);
+  } = useGameEngine(appState, activeRoomId, myPlayerId);
 
   const isMyTurn = appState === 'local' || currentPlayer === myPlayerId;
   const activeQueue = phase === 'placement_p1' ? p1Queue : phase === 'placement_p2' ? p2Queue : phase === 'trap_placement_p1' ? p1TrapQueue : phase === 'trap_placement_p2' ? p2TrapQueue : [];
@@ -215,27 +220,31 @@ function App() {
     socket.connect();
 
     socket.on('error_message', (msg) => { alert(`エラー: ${msg}`); setOnlineStatusMsg(''); });
+    
+    // ★変更：部屋が作成/接続された時に「サーバーから渡された本当の部屋ID」を activeRoomId に保存する
     socket.on('room_created', (data) => {
       setOnlineStatusMsg(`部屋 [${data.roomId}] を作成しました。対戦相手を待っています...`);
       setMyPlayerId(data.playerId);
+      setActiveRoomId(data.roomId);
     });
     socket.on('room_joined', (data) => {
       setOnlineStatusMsg(`部屋 [${data.roomId}] に接続しました！`);
       setMyPlayerId(data.playerId); 
+      setActiveRoomId(data.roomId);
     });
+    
     socket.on('waiting_random', () => {
       setOnlineStatusMsg('野良対戦の相手を探しています...');
     });
     
-    // ★変更: フリーズの原因になる alert を削除し、直接画面を切り替える
     socket.on('game_start', (data) => {
-      console.log(data.message); // コンソールにだけ残す
+      console.log(data.message); 
       setAppState('online_playing'); 
     });
     
     socket.on('opponent_disconnected', () => {
       alert('相手との通信が切断されました（退出または通信エラー）。タイトルに戻ります。');
-      resetGame(); setAppState('menu'); setOnlineStatusMsg(''); setMyPlayerId(null);
+      resetGame(); setAppState('menu'); setOnlineStatusMsg(''); setMyPlayerId(null); setActiveRoomId('');
     });
 
     return () => {
@@ -257,10 +266,10 @@ function App() {
 
   const handleBackToTitle = () => {
     if (appState === 'online_playing' || appState === 'online_menu') {
-      socket.emit('leave_room', roomIdInput);
+      socket.emit('leave_room', activeRoomId); // ★退出時も本当の部屋IDを使う
       socket.emit('leave_random');
     }
-    resetGame(); setAppState('menu'); setOnlineStatusMsg(''); setMyPlayerId(null);
+    resetGame(); setAppState('menu'); setOnlineStatusMsg(''); setMyPlayerId(null); setActiveRoomId('');
   };
 
   const handleResign = () => {
@@ -299,6 +308,7 @@ function App() {
             </div>
           ) : (
             <>
+              {/* 合言葉マッチング */}
               <div className="mb-8">
                 <input type="text" placeholder="合言葉 (例: banana123)" value={roomIdInput} onChange={(e) => setRoomIdInput(e.target.value)} className="w-full p-4 mb-4 rounded-xl bg-gray-900 border-2 border-gray-700 text-xl font-bold text-center text-green-400" />
                 <label className="flex items-center justify-center gap-2 mb-4 text-gray-300 cursor-pointer">
@@ -311,6 +321,7 @@ function App() {
                 </div>
               </div>
 
+              {/* 野良対戦（ランダムマッチ） */}
               <div className="pt-8 border-t border-gray-600">
                 <h3 className="text-xl font-bold text-yellow-400 mb-4">世界中の誰かと対戦 (野良)</h3>
                 <div className="flex flex-col gap-3">
@@ -416,13 +427,12 @@ function App() {
       </div>
 
       <div className="max-w-2xl mx-auto px-4 flex flex-col items-center gap-4 mt-4">
-        {/* 上側の持ち駒（常に相手の持ち駒になり、文字も正立する） */}
+        {/* 上側の持ち駒 */}
         <div className={`w-full bg-opacity-30 p-4 rounded-lg min-h-[80px] border ${TopPlayer === 'player1' ? 'bg-blue-900 border-blue-900' : 'bg-red-900 border-red-900'}`}>
           <p className={`text-sm font-bold mb-2 ${TopPlayer === 'player1' ? 'text-blue-300' : 'text-red-300'}`}>{TopPlayer === 'player1' ? 'Player 1 の持ち駒' : 'Player 2 の持ち駒'}</p>
           <div className="flex flex-wrap gap-2">
             {topCap.map(piece => (
               <div key={piece.id} className={`scale-75 -mr-3 -mb-3 cursor-pointer ${selectedPieceId === piece.id ? 'ring-4 ring-yellow-400 rounded-full z-10 relative' : ''} ${isMyPenaltyTurn && mustDropState?.pieceId !== piece.id ? 'opacity-30' : ''}`} onClick={() => handleCapturedClick(piece.id)}>
-                {/* ★修正：rotate-180を削除して文字を読めるようにしました */}
                 <div><PieceComponent piece={piece} inHand={true} currentPlayer={currentPlayer} /></div>
               </div>
             ))}
@@ -434,7 +444,7 @@ function App() {
           <Board pieces={displayPieces} selectedPieceId={selectedPieceId} selectedCapturedPiece={capturedPieces.find(p => p.id === selectedPieceId)} movablePositions={displayMovablePositions} onCellClick={handleBoardClick} currentPlayer={currentPlayer} />
         </div>
 
-        {/* 下側の持ち駒（常に自分の持ち駒になる） */}
+        {/* 下側の持ち駒 */}
         <div className={`w-full bg-opacity-30 p-4 rounded-lg min-h-[80px] border ${BottomPlayer === 'player1' ? 'bg-blue-900 border-blue-900' : 'bg-red-900 border-red-900'}`}>
           <p className={`text-sm font-bold mb-2 ${BottomPlayer === 'player1' ? 'text-blue-300' : 'text-red-300'}`}>{BottomPlayer === 'player1' ? 'Player 1 の持ち駒' : 'Player 2 の持ち駒'}</p>
           <div className="flex flex-wrap gap-2">

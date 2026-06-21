@@ -13,7 +13,7 @@ const INITIAL_KINGS: Piece[] = [
 ];
 
 const PIECE_POOL = ['pawn', 'silver', 'gold', 'lance', 'rook', 'bishop', 'knight', 'troll', 'trickster', 'wolf', 'hero', 'nuisance', 'bomb', 'landmine', 'bullet', 'drunk', 'renda', 'twins', 'twin_assassin', 'white_sage', 'mushroom', 'shield', 'ghost', 'gamble_jumper', 'anti_promote']; 
-const DEMOTE_MAP: Record<string, string> = { 'tokin': 'pawn', 'promoted_silver': 'silver', 'promoted_lance': 'lance', 'promoted_rook': 'rook', 'promoted_bishop': 'bishop', 'promoted_knight': 'knight', 'promoted_trickster': 'trickster', 'promoted_drunk': 'drunk' , 'promoted_anti_promote': 'anti_promote','activated_bomb': 'bomb' };
+const DEMOTE_MAP: Record<string, string> = { 'tokin': 'pawn', 'promoted_silver': 'silver', 'promoted_lance': 'lance', 'promoted_rook': 'rook', 'promoted_bishop': 'bishop', 'promoted_knight': 'knight', 'promoted_trickster': 'trickster', 'promoted_drunk': 'drunk' , 'promoted_anti_promote': 'anti_promote', 'activated_bomb': 'bomb' };
 
 const resolveNextPlacementPhase = (np1: string[], np2: string[], nt1: string[], nt2: string[], board: Piece[], cap: Piece[]) => {
   if (np1.length > 0) return { phase: 'placement_p1', player: 'player1' };
@@ -53,7 +53,7 @@ export const getInitialGameState = (): GameState => {
   
   const initialData = resolveNextPlacementPhase(p1Q, p2Q, p1TrapQ, p2TrapQ, [...INITIAL_KINGS], cap);
   
-return {
+  return {
     phase: initialData.phase, pieces: [...INITIAL_KINGS], capturedPieces: cap,
     p1Queue: p1Q, p2Queue: p2Q, p1TrapQueue: p1TrapQ, p2TrapQueue: p2TrapQ,
     currentPlayer: initialData.player as PlayerId, selectedPieceId: null, pendingPromotion: null, winner: null,
@@ -62,11 +62,12 @@ return {
     bulletMinigameData: null, pendingMineConfirmation: null,
     turnState: { hasDoubledUp: false, isSecondMove: false }, turnSkipState: { player1: false, player2: false },
     pendingAction: null, chohanState: null, rouletteState: null, wolfDeclaration: null, accuseState: null, swapAbilityState: null,
-    ruleSettings: { useTurnTimer: false } // ★追加
+    ruleSettings: { useTurnTimer: false }
   };
 };
 
 const handleTurnStartEvents = (state: GameState, nextPlayer: PlayerId, currentBoard: Piece[]) => {
+  // ... (そのまま維持) ...
   let nextBoard = [...currentBoard];
   let newWinner: VictoryResult | null = null;
   
@@ -123,6 +124,7 @@ const handleTurnStartEvents = (state: GameState, nextPlayer: PlayerId, currentBo
 };
 
 const endCurrentTurn = (state: GameState, tempPieces: Piece[] = state.pieces): GameState => {
+  // ... (そのまま維持) ...
   let nextState = { ...state };
   const nextPlayer = nextState.currentPlayer === 'player1' ? 'player2' : 'player1';
   nextState.turnState = { hasDoubledUp: false, isSecondMove: false };
@@ -395,10 +397,12 @@ const executeMove = (state: GameState, payload: { pieceId: string, to: Position,
 // ============================================================================
 export const gameReducer = (state: GameState, action: GameAction): GameState => {
   switch (action.type) {
-    case 'SYSTEM_RESET_GAME':
-      return getInitialGameState();
+    // ★変更：リセット時に、前のルールの設定（タイマーの有無など）を引き継ぐように修正
+    case 'SYSTEM_RESET_GAME': {
+      const freshState = getInitialGameState();
+      return { ...freshState, ruleSettings: state.ruleSettings };
+    }
 
-    // ★新規追加：投了処理
     case 'RESIGN': {
       const loser = action.payload.playerId;
       const winnerPlayer = loser === 'player1' ? 'player2' : 'player1';
@@ -409,7 +413,6 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       };
     }
 
-    // ★新規追加：時間切れによる強制ターンスキップ
     case 'SKIP_TURN': {
       let nextState = { ...state };
       nextState = endCurrentTurn(nextState, nextState.pieces);
@@ -428,7 +431,6 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       nextState.phase = 'playing';
       return nextState;
     }
-    
     case 'PLACE_INITIAL_PIECE': {
       const { activePlayer, defId, x, y, isTrapPhase, wolfMimicRole } = action.payload;
       let nextState = { ...state };
