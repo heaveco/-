@@ -441,7 +441,15 @@ function App() {
 
         {/* 盤面本体 */}
         <div className="w-full flex justify-center transition-opacity duration-500">
-          <Board pieces={displayPieces} selectedPieceId={selectedPieceId} selectedCapturedPiece={capturedPieces.find(p => p.id === selectedPieceId)} movablePositions={displayMovablePositions} onCellClick={handleBoardClick} currentPlayer={currentPlayer} />
+          <Board 
+            pieces={displayPieces} 
+            selectedPieceId={selectedPieceId} 
+            selectedCapturedPiece={capturedPieces.find(p => p.id === selectedPieceId)} 
+            movablePositions={displayMovablePositions} 
+            onCellClick={handleBoardClick} 
+            currentPlayer={currentPlayer} 
+            isFlipped={isFlipped} // ★これを追加
+            />
         </div>
 
         {/* 下側の持ち駒 */}

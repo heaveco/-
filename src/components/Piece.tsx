@@ -4,7 +4,8 @@ import React from 'react';
 import type { Piece as PieceType, PlayerId } from '../entities/types';
 import { PIECE_DEFINITIONS } from '../data/pieces';
 
-interface Props { piece: PieceType; inHand?: boolean; currentPlayer: PlayerId; }
+interface Props { piece: PieceType; inHand?: boolean; currentPlayer: PlayerId; isFlipped?: boolean; }
+
 
 export const Piece: React.FC<Props> = ({ piece, inHand, currentPlayer }) => {
   const def = PIECE_DEFINITIONS[piece.definitionId];
@@ -42,25 +43,29 @@ export const Piece: React.FC<Props> = ({ piece, inHand, currentPlayer }) => {
     displayName = '×';
   }
 
-  let textSizeClass = 'text-lg';
+let textSizeClass = 'text-lg';
   if (displayName.length === 2) textSizeClass = 'text-sm';
-  else if (displayName.length >= 3) textSizeClass = 'text-xs leading-tight tracking-tighter';
+  else if (displayName.length === 3 || displayName.length === 4) textSizeClass = 'text-xs leading-tight tracking-tighter';
+  else if (displayName.length >= 5) textSizeClass = 'text-[9px] leading-none tracking-tighter'; // ★追加: 超長文用
 
   const width = def?.size?.width || 1; 
   const height = def?.size?.height || 1;
 
+  // 46行目付近: 大型コマの描画方向を反転状況によって変更する
   let dimensionClasses = 'w-12 h-12 relative';
   if (!inHand) {
     if (width === 2 && height === 2) {
-      dimensionClasses = 'w-[132px] h-[132px] absolute top-0 left-0';
+      // 反転時は基点が右下になるため、上と左に向かって拡張させる
+      dimensionClasses = `w-[132px] h-[132px] absolute ${isFlipped ? 'bottom-0 right-0' : 'top-0 left-0'}`;
     } else if (width === 2 && height === 1) {
-      dimensionClasses = 'w-[132px] h-[64px] absolute top-0 left-0';
+      dimensionClasses = `w-[132px] h-[64px] absolute ${isFlipped ? 'bottom-0 right-0' : 'top-0 left-0'}`;
     }
   }
 
   return (
     <div className={`${dimensionClasses} rounded-full flex items-center justify-center text-white font-bold shadow-[0_4px_15px_rgba(0,0,0,0.4)] ${bgColor} transform transition-transform hover:scale-105 text-center p-1 pointer-events-none`}>
-      <span className={textSizeClass} style={{ wordBreak: 'keep-all' }}>{displayName}</span>
+      {/* ★変更: 長すぎる場合は改行を許可する（wordBreakの動的変更） */}
+      <span className={textSizeClass} style={{ wordBreak: displayName.length >= 5 ? 'normal' : 'keep-all' }}>{displayName}</span>
       
       {isPoisoned && (
         <span className="absolute -top-2 -left-2 bg-purple-700 text-white text-[10px] px-1 py-0.5 rounded-full shadow-lg border border-purple-400 animate-pulse font-bold z-10">
