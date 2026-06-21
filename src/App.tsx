@@ -182,6 +182,8 @@ function App() {
             <p className="mb-2">"双子"のコマ二種につきましては、@MADOguchimoto様の投稿(<a href="https://x.gd/fzSC4" className="underline hover:text-white" target="_blank" rel="noreferrer">X:旧Twitter</a>)が本家になります。</p>
             <p className="mb-4">"白の賢人","転移"につきましては、同投稿者様の投稿(<a href="https://x.gd/srSvc" className="underline hover:text-white" target="_blank" rel="noreferrer">リンク</a>)が本家になります。</p>
             <p className="text-gray-400">上記原作者様達へのリスペクトは前提ですが、コードを弄れる方は、ぜひ自由に改造して遊んだり、より良いものに進化させたりしてください。</p>
+            <p className="text-gray-400">※本ゲームはAI(Gemini)を用いて開発されています。</p>
+            <p className="text-gray-400">mail:zakkuri.synapse@gmail.com</p>
           </div>
 
           <div className="flex flex-col gap-6 w-full max-w-md mx-auto">
