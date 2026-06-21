@@ -2,7 +2,8 @@
 import React from 'react';
 import type { Piece as PieceType, Position, PlayerId } from '../entities/types';
 import { Piece } from './Piece';
-import { getOccupiedPositions } from '../rules/movement';
+import { getOccupiedPositions, getEffectiveDefinition } from '../rules/movement';
+import { PIECE_DEFINITIONS } from '../data/pieces';
 
 interface Props {
   pieces: PieceType[];
@@ -10,7 +11,7 @@ interface Props {
   selectedCapturedPiece: PieceType | undefined;
   movablePositions: Position[];
   onCellClick: (x: number, y: number) => void;
-  currentPlayer: PlayerId; // ★新規
+  currentPlayer: PlayerId;
 }
 
 export const Board: React.FC<Props> = ({ pieces, selectedPieceId, selectedCapturedPiece, movablePositions, onCellClick, currentPlayer }) => {
@@ -42,10 +43,11 @@ export const Board: React.FC<Props> = ({ pieces, selectedPieceId, selectedCaptur
 
           return (
             <div key={`${cell.x}-${cell.y}`} className={`relative w-16 h-16 flex items-center justify-center rounded transition-all duration-200 ${bgClass} ${zIndexClass}`} onClick={() => onCellClick(cell.x, cell.y)}>
-              {pieceOnCellAnchor ? (
-                <Piece piece={pieceOnCellAnchor} currentPlayer={currentPlayer} />
-              ) : (
-                <span className="text-xs text-gray-500 opacity-50 select-none pointer-events-none">{cell.x},{cell.y}</span>
+              {pieceOnCellAnchor && (
+                // ★修正：コマの幅（width）が2以上の場合は、CSSで左上に位置を補正する
+                <div className={`absolute top-0 left-0 ${PIECE_DEFINITIONS[pieceOnCellAnchor.definitionId]?.size?.width === 2 ? '-translate-x-[68px]' : ''}`}>
+                  <Piece piece={pieceOnCellAnchor} inHand={false} currentPlayer={currentPlayer} />
+                </div>
               )}
             </div>
           );
