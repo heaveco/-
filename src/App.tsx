@@ -203,7 +203,7 @@ function App() {
               <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 10px, #000 10px, #000 20px)' }}></div>
               <div className="relative z-10 flex flex-col items-center justify-center">
                 <span className="text-3xl mb-1">🌐 オンライン対戦</span>
-                <span className="text-sm font-bold text-yellow-500 animate-pulse">🚧 絶賛開発中 🚧</span>
+                <span className="text-sm font-bold text-yellow-500 animate-pulse">🚧 開発中 🚧</span>
               </div>
             </button>
           </div>
