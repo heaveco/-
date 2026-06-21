@@ -19,9 +19,8 @@ const io = new Server(httpServer, {
 const roomStates = new Map<string, GameState>();
 const roomPlayers = new Map<string, { player1?: string, player2?: string }>();
 
-// ★新規追加：野良対戦用の待機列
-const randomQueueOn: string[] = []; // タイマーあり
-const randomQueueOff: string[] = []; // タイマーなし
+const randomQueueOn: string[] = []; 
+const randomQueueOff: string[] = []; 
 
 const maskState = (state: GameState, playerId: string): GameState => {
   const masked = JSON.parse(JSON.stringify(state)) as GameState;
@@ -49,7 +48,6 @@ const maskState = (state: GameState, playerId: string): GameState => {
   return masked;
 };
 
-// 待機列から離脱する関数
 const removeFromRandomQueue = (socketId: string) => {
   const idxOn = randomQueueOn.indexOf(socketId);
   if (idxOn > -1) randomQueueOn.splice(idxOn, 1);
@@ -60,7 +58,6 @@ const removeFromRandomQueue = (socketId: string) => {
 io.on('connection', (socket) => {
   console.log(`🟢 プレイヤー接続: ${socket.id}`);
 
-  // ★変更：タイマー設定（useTimer）を受け取る
   socket.on('create_room', ({ roomId, useTimer }) => {
     socket.join(roomId);
     
@@ -98,14 +95,15 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ★新規追加：野良対戦のマッチング
+  // ★ 修正：自分自身とマッチングしてしまう「自己ループバグ」を完全に防ぎます
   socket.on('join_random', ({ useTimer }) => {
+    removeFromRandomQueue(socket.id); // まず自分が別のキューにいたら削除
+
     const queue = useTimer ? randomQueueOn : randomQueueOff;
-    // 切断済みのプレイヤーを掃除
-    const validQueue = queue.filter(id => io.sockets.sockets.get(id));
+    // 自分以外で、かつ現在も接続中のプレイヤーを探す
+    const validQueue = queue.filter(id => id !== socket.id && io.sockets.sockets.get(id));
 
     if (validQueue.length > 0) {
-      // マッチング成立！
       const opponentId = validQueue.shift()!;
       if (useTimer) randomQueueOn.splice(randomQueueOn.indexOf(opponentId), 1);
       else randomQueueOff.splice(randomQueueOff.indexOf(opponentId), 1);
@@ -126,7 +124,6 @@ io.on('connection', (socket) => {
       io.to(opponentId).emit('game_start', { message: '野良対戦の相手が見つかりました！', state: maskState(initialState, 'player1') });
       socket.emit('game_start', { message: '野良対戦の相手が見つかりました！', state: maskState(initialState, 'player2') });
     } else {
-      // 待機列に並ぶ
       if (useTimer) randomQueueOn.push(socket.id);
       else randomQueueOff.push(socket.id);
       socket.emit('waiting_random');

@@ -15,7 +15,7 @@ export const useGameEngine = (appState: string, roomId: string, myPlayerId: Play
 
   useEffect(() => {
     const handleUpdateState = (newState: any) => {
-      setState(newState);
+      setState(newState); 
     };
     socket.on('game_start', (data) => setState(data.state));
     socket.on('update_state', handleUpdateState);
@@ -29,7 +29,7 @@ export const useGameEngine = (appState: string, roomId: string, myPlayerId: Play
   const {
     phase, pieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, pendingPromotion, winner,
     chohanState, rouletteState, turnState, turnSkipState, wolfDeclaration, accuseState, turnCount, mustDropState, pendingBombActivation, bulletMinigameData,
-    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState, pendingAction, ruleSettings // ★追加
+    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState, pendingAction, ruleSettings
   } = state;
 
   const selectedBoardPiece = pieces.find(p => p.id === selectedPieceId);
@@ -52,6 +52,12 @@ export const useGameEngine = (appState: string, roomId: string, myPlayerId: Play
       });
     } else if (selectedBoardPiece) {
       movablePositions = calculateMovablePositions(selectedBoardPiece, pieces, turnCount);
+
+      // ★ 新規追加：成る前のトリックスターは、縦方向の移動（Y座標の差が4のワープ）を禁止する
+      if (selectedBoardPiece.definitionId === 'trickster') {
+        movablePositions = movablePositions.filter(pos => Math.abs(pos.y - selectedBoardPiece.position.y) !== 4);
+      }
+
     } else if (selectedCapturedPiece) {
       const def = getEffectiveDefinition(selectedCapturedPiece);
       const w = def?.size?.width || 1; const h = def?.size?.height || 1;
@@ -74,23 +80,16 @@ export const useGameEngine = (appState: string, roomId: string, myPlayerId: Play
     }
   }
 
-  // =========================================================
-  // ★最強の dispatch 関数：オンラインならサーバーへ、ローカルなら自分の画面で計算
-  // =========================================================
   const dispatch = (action: any) => {
     if (isOnline) {
-      // オンライン対戦：サーバーに「注文票」を送るだけ！
       socket.emit('send_action', { roomId, action });
     } else {
-      // ローカル対戦：今まで通り自分の画面内で即座に計算する
       setState(prevState => gameReducer(prevState, action));
     }
   };
 
   const handleCellClick = (x: number, y: number) => {
-    // ★追加：オンライン対戦時、自分のターンじゃない時は一切の操作を無効化する防御壁
     if (isOnline && myPlayerId !== currentPlayer) return;
-
     if (wolfDeclaration || accuseState || pendingPromotion || winner || pendingBombActivation || pendingMineConfirmation || swapAbilityState?.step === 'ask' || swapAbilityState?.step === 'confirm') return;
 
     if (phase.startsWith('placement') || phase.startsWith('trap_placement')) {
@@ -196,9 +195,7 @@ export const useGameEngine = (appState: string, roomId: string, myPlayerId: Play
   };
 
   const handleCapturedClick = (pieceId: string) => {
-    // ★追加：オンライン対戦時、自分のターンじゃない時は一切の操作を無効化する防御壁
     if (isOnline && myPlayerId !== currentPlayer) return;
-
     if (phase !== 'playing' || pendingPromotion || winner || turnState.isSecondMove || wolfDeclaration || accuseState || pendingBombActivation || pendingMineConfirmation || swapAbilityState?.step === 'ask' || swapAbilityState?.step === 'confirm') return;
     if (mustDropState?.playerId === currentPlayer && pieceId !== mustDropState.pieceId) return;
 
@@ -245,14 +242,13 @@ export const useGameEngine = (appState: string, roomId: string, myPlayerId: Play
   const resolveGambleJump = (x: number, y: number) => dispatch({ type: 'RESOLVE_GAMBLE_JUMP', payload: { x, y } });
   const cancelGambleJump = () => dispatch({ type: 'CANCEL_GAMBLE_JUMP' });
 
-  const visiblePieces = pieces.filter(p => phase === 'placement_p1' ? p.owner === 'player1' : phase === 'placement_p2' ? p.owner === 'player2' : true);
+  // ★ 修正：配置中などに相手の駒が見えない不具合を解消しました
+  const visiblePieces = pieces;
 
-return {
+  return {
     phase, pieces: visiblePieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, movablePositions, pendingPromotion, winner,
     chohanState, rouletteState, turnState, turnSkipState, wolfDeclaration, accuseState, WOLF_ROLES, turnCount, mustDropState, pendingBombActivation, bulletMinigameData,
-    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState,
-    ruleSettings, // ★追加
-    dispatch, 
+    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState, ruleSettings, dispatch, 
     handleCellClick, handleCapturedClick, resolvePromotion, resolveWolfDeclaration, resetGame,
     proceedAccusation, cancelAccusation, resolveAccusation, closeAccusationResult, playChohan, resolveChohan, startRoulette, resolveRoulette, resolveBombActivation, resolveBullet,
     startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation, resolveSwapAbility, resolveGambleJump, cancelGambleJump

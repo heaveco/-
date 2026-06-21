@@ -226,10 +226,13 @@ function App() {
     socket.on('waiting_random', () => {
       setOnlineStatusMsg('野良対戦の相手を探しています...');
     });
+    
+    // ★変更: フリーズの原因になる alert を削除し、直接画面を切り替える
     socket.on('game_start', (data) => {
-      alert(data.message);
+      console.log(data.message); // コンソールにだけ残す
       setAppState('online_playing'); 
     });
+    
     socket.on('opponent_disconnected', () => {
       alert('相手との通信が切断されました（退出または通信エラー）。タイトルに戻ります。');
       resetGame(); setAppState('menu'); setOnlineStatusMsg(''); setMyPlayerId(null);
@@ -296,7 +299,6 @@ function App() {
             </div>
           ) : (
             <>
-              {/* 合言葉マッチング */}
               <div className="mb-8">
                 <input type="text" placeholder="合言葉 (例: banana123)" value={roomIdInput} onChange={(e) => setRoomIdInput(e.target.value)} className="w-full p-4 mb-4 rounded-xl bg-gray-900 border-2 border-gray-700 text-xl font-bold text-center text-green-400" />
                 <label className="flex items-center justify-center gap-2 mb-4 text-gray-300 cursor-pointer">
@@ -309,7 +311,6 @@ function App() {
                 </div>
               </div>
 
-              {/* 野良対戦（ランダムマッチ） */}
               <div className="pt-8 border-t border-gray-600">
                 <h3 className="text-xl font-bold text-yellow-400 mb-4">世界中の誰かと対戦 (野良)</h3>
                 <div className="flex flex-col gap-3">
@@ -346,9 +347,6 @@ function App() {
 
   const myPlayerLabel = appState === 'online_playing' ? (myPlayerId === 'player1' ? '【あなたは Player 1 (青) です】' : '【あなたは Player 2 (赤) です】') : '';
 
-  // ============================================================================
-  // ★最強の視認性改善：データレイヤーでの座標反転
-  // ============================================================================
   const isFlipped = appState === 'online_playing' && myPlayerId === 'player2';
 
   const displayPieces = pieces.map(p => {
@@ -418,19 +416,20 @@ function App() {
       </div>
 
       <div className="max-w-2xl mx-auto px-4 flex flex-col items-center gap-4 mt-4">
-        {/* 上側の持ち駒（常に相手の持ち駒になる） */}
+        {/* 上側の持ち駒（常に相手の持ち駒になり、文字も正立する） */}
         <div className={`w-full bg-opacity-30 p-4 rounded-lg min-h-[80px] border ${TopPlayer === 'player1' ? 'bg-blue-900 border-blue-900' : 'bg-red-900 border-red-900'}`}>
           <p className={`text-sm font-bold mb-2 ${TopPlayer === 'player1' ? 'text-blue-300' : 'text-red-300'}`}>{TopPlayer === 'player1' ? 'Player 1 の持ち駒' : 'Player 2 の持ち駒'}</p>
           <div className="flex flex-wrap gap-2">
             {topCap.map(piece => (
               <div key={piece.id} className={`scale-75 -mr-3 -mb-3 cursor-pointer ${selectedPieceId === piece.id ? 'ring-4 ring-yellow-400 rounded-full z-10 relative' : ''} ${isMyPenaltyTurn && mustDropState?.pieceId !== piece.id ? 'opacity-30' : ''}`} onClick={() => handleCapturedClick(piece.id)}>
-                <div className="rotate-180"><PieceComponent piece={piece} inHand={true} currentPlayer={currentPlayer} /></div>
+                {/* ★修正：rotate-180を削除して文字を読めるようにしました */}
+                <div><PieceComponent piece={piece} inHand={true} currentPlayer={currentPlayer} /></div>
               </div>
             ))}
           </div>
         </div>
 
-        {/* 盤面本体（CSSのrotate-180を廃止し、データ反転で対応） */}
+        {/* 盤面本体 */}
         <div className="w-full flex justify-center transition-opacity duration-500">
           <Board pieces={displayPieces} selectedPieceId={selectedPieceId} selectedCapturedPiece={capturedPieces.find(p => p.id === selectedPieceId)} movablePositions={displayMovablePositions} onCellClick={handleBoardClick} currentPlayer={currentPlayer} />
         </div>
@@ -448,7 +447,7 @@ function App() {
         </div>
       </div>
 
-      {/* --- 転移ルーレット画面 --- */}
+      {/* --- 各種イベントUI --- */}
       {phase === 'minigame_gamble_jump' && (
         <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
           <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-2 border-green-500 max-w-md w-full">
