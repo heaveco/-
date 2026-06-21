@@ -396,6 +396,16 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
   switch (action.type) {
     case 'SYSTEM_RESET_GAME':
       return getInitialGameState();
+      
+      // ★新規追加：投了処理
+    case 'RESIGN': {
+      const loser = action.payload.playerId;
+      const winnerPlayer = loser === 'player1' ? 'player2' : 'player1';
+      return { 
+        ...state, 
+        winner: { winner: winnerPlayer, reason: '相手が投了しました。' } 
+      };
+    }
     
     case 'PLACE_INITIAL_PIECE': {
       const { activePlayer, defId, x, y, isTrapPhase, wolfMimicRole } = action.payload;

@@ -113,6 +113,7 @@ function App() {
   const jumpAngleRef = useRef(0);
   const jumpIsSpinningRef = useRef(false);
 
+// 1. Appコンポーネントの前半部分の useEffect に切断監視を追加
   useEffect(() => {
     socket.connect();
 
@@ -136,11 +137,21 @@ function App() {
       setAppState('online_playing'); 
     });
 
+    // ★新規追加：相手が退出・切断した時のイベント
+    socket.on('opponent_disconnected', () => {
+      alert('相手との通信が切断されました（退出または通信エラー）。タイトルに戻ります。');
+      resetGame();
+      setAppState('menu');
+      setOnlineStatusMsg('');
+      setMyPlayerId(null);
+    });
+
     return () => {
       socket.off('error_message');
       socket.off('room_created');
       socket.off('room_joined');
       socket.off('game_start');
+      socket.off('opponent_disconnected'); // ★追加
     };
   }, []);
 
@@ -264,11 +275,22 @@ function App() {
     socket.emit('join_room', roomIdInput);
   };
 
+// ★変更：タイトルに戻る際、サーバーに退出を通知する
   const handleBackToTitle = () => {
+    if (appState === 'online_playing' || appState === 'online_menu') {
+      socket.emit('leave_room', roomIdInput);
+    }
     resetGame();
     setAppState('menu');
     setOnlineStatusMsg('');
     setMyPlayerId(null);
+  };
+
+  // ★新規追加：投了する処理
+  const handleResign = () => {
+    if (window.confirm('本当に投了しますか？（負けを認めます）')) {
+      dispatch({ type: 'RESIGN', payload: { playerId: myPlayerId } });
+    }
   };
 
   if (appState === 'menu') {
@@ -322,15 +344,25 @@ function App() {
 
   if (appState === 'online_menu') {
     return (
-      <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center font-sans relative overflow-hidden">
-        <button onClick={handleBackToTitle} className="absolute top-4 left-4 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-lg text-sm font-bold shadow-lg shadow-black/50 transition-colors flex items-center gap-2 z-20">
-          ◀ タイトルへ戻る
-        </button>
-        
-        <div className="bg-gray-800 p-8 rounded-2xl shadow-2xl border border-green-500 w-full max-w-md text-center z-10 backdrop-blur-sm bg-opacity-95">
-          <h2 className="text-3xl font-bold mb-6 text-green-400 tracking-wide flex items-center justify-center gap-2">
-            <span>🌐</span> オンライン対戦
-          </h2>
+    <div className="min-h-screen bg-gray-900 text-white font-sans relative pb-10 overflow-hidden pt-4">
+      {/* ★変更：オンライン対戦中は「タイトルに戻る」を隠し「投了」を出す */}
+      <div className="absolute top-4 left-4 z-20">
+        {appState === 'online_playing' ? (
+          <button 
+          onClick={handleResign} 
+          className="px-4 py-2 bg-red-900 hover:bg-red-800 border border-red-500 rounded-lg text-sm font-bold shadow-lg transition-colors flex items-center gap-2"
+          >
+            🏳️ 投了する
+            </button>
+            ) : (
+            <button 
+            onClick={handleBackToTitle} 
+            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-lg text-sm font-bold shadow-lg transition-colors flex items-center gap-2"
+            >
+              ◀ タイトルへ戻る
+              </button>
+            )}
+            </div>
           
           {onlineStatusMsg ? (
             <div className="py-12 flex flex-col items-center justify-center">
@@ -779,14 +811,28 @@ function App() {
           </div>
         </div>
       )}
+      {/* ★変更：勝敗画面の表示を YOU WIN / YOU LOSE に切り替え */}
       {winner && (
         <div className="absolute inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50">
-          <div className="bg-gray-800 p-8 rounded-xl text-center">
-            <h2 className="text-6xl text-yellow-400 mb-4">{winner.winner === 'player1' ? 'BLUE WIN!' : 'RED WIN!'}</h2>
-            <p className="mb-8 text-xl">{winner.reason}</p>
-            <div className="flex flex-col gap-4">
-              <button onClick={resetGame} className="w-full py-3 bg-green-600 hover:bg-green-500 rounded text-xl font-bold">もう一度遊ぶ</button>
-              <button onClick={handleBackToTitle} className="w-full py-3 bg-gray-600 hover:bg-gray-500 rounded text-xl font-bold">タイトルへ戻る</button>
+          <div className="bg-gray-800 p-8 rounded-xl text-center shadow-[0_0_50px_rgba(0,0,0,1)] border-2 border-gray-600">
+            {appState === 'online_playing' ? (
+              // オンライン時の主観的表示
+              <h2 className={`text-6xl mb-6 font-black tracking-widest drop-shadow-lg ${winner.winner === myPlayerId ? 'text-yellow-400' : 'text-blue-500'}`}>
+                {winner.winner === myPlayerId ? '🎊 YOU WIN! 🎊' : '💀 YOU LOSE... 💀'}
+                </h2>
+                ) : (
+                  // ローカル時の客観的表示
+                  <h2 className="text-6xl text-yellow-400 mb-6 font-black tracking-widest drop-shadow-lg">
+                    {winner.winner === 'player1' ? 'BLUE WIN!' : 'RED WIN!'}
+                    </h2>
+                  )}
+                  
+                  <p className="mb-8 text-xl font-bold text-gray-300 bg-gray-900 inline-block px-6 py-3 rounded-lg border border-gray-700">{winner.reason}</p>
+                  
+                  <div className="flex flex-col gap-4 max-w-sm mx-auto">
+                    {/* 「もう一度遊ぶ」を押すと、SYSTEM_RESET_GAME がサーバーに飛び、相手も強制リスタートになる（リマッチ機能として機能します） */}
+                    <button onClick={resetGame} className="w-full py-4 bg-green-600 hover:bg-green-500 rounded-xl text-xl font-bold shadow-lg transform active:scale-95 transition-all">もう一度遊ぶ</button>
+                    <button onClick={handleBackToTitle} className="w-full py-4 bg-gray-700 hover:bg-gray-600 rounded-xl text-xl font-bold shadow-lg transform active:scale-95 transition-all">タイトルへ戻る（退出）</button>
             </div>
           </div>
         </div>

@@ -69,4 +69,6 @@ export type GameAction =
   | { type: 'SET_ACCUSE_STATE'; payload: any | null }
   | { type: 'SET_CHOHAN_STATE'; payload: any | null }
   | { type: 'SET_SWAP_ABILITY_STATE'; payload: any | null }
-  | { type: 'START_BULLET_MINIGAME'; payload: { pieceId: string } };
+  | { type: 'START_BULLET_MINIGAME'; payload: { pieceId: string } }
+  // ★新規追加：投了アクション
+  | { type: 'RESIGN'; payload: { playerId: PlayerId } };
