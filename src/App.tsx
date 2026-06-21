@@ -6,7 +6,6 @@ import { Piece as PieceComponent } from './components/Piece';
 import { useGameEngine, WOLF_ROLES } from './engine/useGameEngine';
 import { PIECE_DEFINITIONS } from './data/pieces';
 
-// ★新規追加：転移ルーレット用の20分割データ（1~5が4回繰り返される）
 const JUMP_TARGETS = Array.from({length: 20}, (_, i) => ({ 
   value: (i % 5) + 1, 
   color: ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7'][i % 5], 
@@ -15,12 +14,14 @@ const JUMP_TARGETS = Array.from({length: 20}, (_, i) => ({
 }));
 
 function App() {
+  // ★新規追加：アプリ全体の画面状態（タイトルメニューか、ローカル対戦画面か）
+  const [appState, setAppState] = useState<'menu' | 'local'>('menu');
+
   const { 
-    phase, pieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, movablePositions, 
-    handleCellClick, handleCapturedClick, pendingPromotion, winner, resetGame,
+    phase, pieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, movablePositions, pendingPromotion, winner, resetGame,
     chohanState, rouletteState, turnState, turnSkipState, wolfDeclaration, accuseState, turnCount, mustDropState, pendingBombActivation, bulletMinigameData,
     rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState,
-    resolvePromotion, resolveWolfDeclaration, proceedAccusation, cancelAccusation, resolveAccusation, closeAccusationResult, 
+    handleCellClick, handleCapturedClick, resolvePromotion, resolveWolfDeclaration, proceedAccusation, cancelAccusation, resolveAccusation, closeAccusationResult, 
     playChohan, resolveChohan, startRoulette, resolveRoulette, resolveBombActivation, resolveBullet,
     startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation, resolveSwapAbility, resolveGambleJump, cancelGambleJump
   } = useGameEngine();
@@ -29,7 +30,6 @@ function App() {
   const [isSpinning, setIsSpinning] = useState(false);
   const [bulletResult, setBulletResult] = useState<{ targetId: string | null, label: string } | null>(null);
 
-  // --- 転移ルーレット用ステート ---
   const [jumpRotationAngle, setJumpRotationAngle] = useState(0);
   const [jumpIsSpinning, setJumpIsSpinning] = useState(false);
   const [jumpStep, setJumpStep] = useState<'idle' | 'spinX' | 'spinY' | 'result'>('idle');
@@ -37,7 +37,6 @@ function App() {
   const [jumpResultY, setJumpResultY] = useState<number | null>(null);
   const [jumpSpeed, setJumpSpeed] = useState(400);
 
-  // ★追加：Reactのレンダリングラグを無視して即座にアニメーションを止めるためのRef
   const jumpAngleRef = useRef(0);
   const jumpIsSpinningRef = useRef(false);
 
@@ -46,13 +45,10 @@ function App() {
       const initialAngle = Math.random() * 360;
       jumpAngleRef.current = initialAngle;
       setJumpRotationAngle(initialAngle);
-      
       setJumpSpeed(Math.floor(Math.random() * 400) + 300);
       setJumpStep('spinX');
-      
       jumpIsSpinningRef.current = true;
       setJumpIsSpinning(true);
-      
       setJumpResultX(null);
       setJumpResultY(null);
     } else {
@@ -64,7 +60,6 @@ function App() {
     let animFrame: number;
     let lastTime = performance.now();
     const animate = (time: number) => {
-      // ★修正：StateではなくRefを直接参照することで、暴走を確実に防ぐ
       if (phase === 'minigame_gamble_jump' && jumpIsSpinningRef.current) {
         const delta = time - lastTime;
         lastTime = time;
@@ -80,18 +75,13 @@ function App() {
   }, [phase, jumpIsSpinning, jumpSpeed]);
 
   const handleStopJump = () => {
-    // ★目押し防止：ストップを押した瞬間に 1.5〜3.5マス分（27度〜63度）ランダムに滑る
     const slip = Math.floor(Math.random() * 36) + 27; 
     const finalAngle = jumpAngleRef.current + slip; 
-    
-    // アニメーションループを強制終了させる
     jumpAngleRef.current = finalAngle;
     jumpIsSpinningRef.current = false;
-    
-    setJumpRotationAngle(finalAngle); // CSSのtransitionでスーッと滑って止まる
+    setJumpRotationAngle(finalAngle);
     setJumpIsSpinning(false);
 
-    // 針の判定（滑った後の角度で計算）
     const normalizedFinal = finalAngle % 360;
     const needleAngleOnDisk = (360 - normalizedFinal) % 360;
     const hitTarget = JUMP_TARGETS.find(t => needleAngleOnDisk >= t.startAngle && needleAngleOnDisk < t.endAngle);
@@ -112,7 +102,6 @@ function App() {
       }, 600);
     }
   };
-  // ------------------------------------------
 
   useEffect(() => {
     if (phase === 'minigame_bullet' && bulletMinigameData) {
@@ -161,6 +150,71 @@ function App() {
     return () => clearInterval(timerId);
   }, [phase, rendaSettingState?.isActive, rendaSettingState?.timeLeft, rendaPlayState?.isActive, rendaPlayState?.timeLeft]);
 
+  const handleBackToTitle = () => {
+    resetGame();
+    setAppState('menu');
+  };
+
+  // ============================================================================
+  // ★新規追加：タイトルメニュー画面
+  // ============================================================================
+  if (appState === 'menu') {
+    return (
+      <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center font-sans relative overflow-hidden">
+        {/* 背景の装飾 */}
+        <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 pointer-events-none opacity-20">
+          <div className="absolute w-96 h-96 bg-blue-600 rounded-full blur-[100px] -top-20 -left-20"></div>
+          <div className="absolute w-96 h-96 bg-red-600 rounded-full blur-[100px] top-1/2 right-10"></div>
+        </div>
+
+        <div className="z-10 text-center max-w-2xl px-4">
+          <h1 className="text-6xl md:text-7xl font-black mb-4 tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-400 to-red-400 drop-shadow-lg">
+            将棋の新弾
+          </h1>
+          <p className="text-xl md:text-2xl font-bold text-gray-300 mb-8 tracking-widest">
+            非公式ファンゲーム
+          </p>
+
+          <div className="bg-gray-800 bg-opacity-80 border border-yellow-600/50 p-6 rounded-2xl text-xs md:text-sm text-yellow-100 text-left mb-12 shadow-2xl backdrop-blur-sm leading-relaxed">
+            <p className="font-bold text-yellow-400 mb-2 text-base">⚠️ 二次創作に関するガイドラインへの配慮</p>
+            <p className="mb-2">本ゲームは、オモコロチャンネル様(<a href="https://www.youtube.com/@omocorochannel" className="underline hover:text-white" target="_blank" rel="noreferrer">リンク</a>)の動画企画「将棋の新弾」を元にした、ファンによる非公式の二次創作（開発途中版）です。</p>
+            <p className="mb-2">公式（株式会社バーグハンバーグバーグ様）とは一切関係ありません。完全非営利で運営されており、権利所有者様からの取り下げ要請があった場合は速やかに公開を停止します。</p>
+            <p className="mb-2">"双子"のコマ二種につきましては、@MADOguchimoto様の投稿(<a href="https://x.gd/fzSC4" className="underline hover:text-white" target="_blank" rel="noreferrer">X:旧Twitter</a>)が本家になります。</p>
+            <p className="mb-4">"白の賢人","転移"につきましては、同投稿者様の投稿(<a href="https://x.gd/srSvc" className="underline hover:text-white" target="_blank" rel="noreferrer">リンク</a>)が本家になります。</p>
+            <p className="text-gray-400">上記原作者様達へのリスペクトは前提ですが、コードを弄れる方は、ぜひ自由に改造して遊んだり、より良いものに進化させたりしてください。</p>
+          </div>
+
+          <div className="flex flex-col gap-6 w-full max-w-md mx-auto">
+            <button 
+              onClick={() => setAppState('local')} 
+              className="group relative w-full py-5 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 rounded-2xl font-bold text-2xl shadow-[0_0_20px_rgba(37,99,235,0.4)] hover:shadow-[0_0_30px_rgba(37,99,235,0.6)] transform transition-all hover:-translate-y-1 overflow-hidden"
+            >
+              <div className="relative z-10 flex flex-col items-center justify-center">
+                <span className="text-3xl mb-1">💻 ローカル対戦</span>
+                <span className="text-sm font-normal text-blue-100">1台のスマホ/PCで交互に操作して遊ぶ</span>
+              </div>
+            </button>
+
+            <button 
+              disabled 
+              className="w-full py-5 bg-gray-800 rounded-2xl font-bold text-2xl text-gray-500 border-2 border-gray-700 cursor-not-allowed relative overflow-hidden"
+            >
+              {/* ストライプ模様のCSSハック */}
+              <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 10px, #000 10px, #000 20px)' }}></div>
+              <div className="relative z-10 flex flex-col items-center justify-center">
+                <span className="text-3xl mb-1">🌐 オンライン対戦</span>
+                <span className="text-sm font-bold text-yellow-500 animate-pulse">🚧 絶賛開発中 🚧</span>
+              </div>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ============================================================================
+  // ローカル対戦画面（既存のUI）
+  // ============================================================================
   let statusText = '';
   if (winner) statusText = 'ゲーム終了！';
   else if (phase === 'placement_p1') statusText = '【配置】Player 1 (青) : 一番手前の列に駒を置いてください';
@@ -183,19 +237,18 @@ function App() {
   const isMyPenaltyTurn = mustDropState?.playerId === currentPlayer;
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white font-sans relative pb-10 overflow-hidden">
-      <div className="text-center pt-8">
-        <h1 className="text-3xl font-bold mb-2">Custom Board Game</h1>
-        <div className="max-w-xl mx-auto mb-4 px-4 py-2 bg-gray-800 border border-yellow-600 rounded-lg text-xs text-yellow-400 text-left">
-          <p className="font-bold mb-1">⚠️ 二次創作に関するガイドラインへの配慮</p>
-          <p>本ゲームは、オモコロチャンネル様(https://www.youtube.com/@omocorochannel)の動画企画「将棋の新弾」を元にした、ファンによる非公式の二次創作（開発途中版）です。</p>
-          <p>公式（株式会社バーグハンバーグバーグ様）とは一切関係ありません。</p>
-          <p>完全非営利で運営されており、権利所有者様からの取り下げ要請があった場合は速やかに公開を停止します。</p>
-          <p>"双子"のコマ二種につきましては、@MADOguchimoto様の投稿(X:旧Twitter)https://x.gd/fzSC4が本家になります。</p>
-          <p>"白の賢人","転移"につきましては、同投稿者様の投稿https://x.gd/srSvcが本家になります。</p>
-          <p>上記原作者様達へのリスペクトは前提ですが、コードを弄れる方は、ぜひ自由に改造して遊んだり、より良いものに進化させたりしてください。よろしくお願いいたします。</p>
-          <p>mail:zakkuri.synapse@gmail.com</p>
-        </div>
+    <div className="min-h-screen bg-gray-900 text-white font-sans relative pb-10 overflow-hidden pt-4">
+      {/* ★新規追加：タイトルへ戻るボタン */}
+      <div className="absolute top-4 left-4 z-20">
+        <button 
+          onClick={handleBackToTitle} 
+          className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-lg text-sm font-bold shadow-lg transition-colors flex items-center gap-2"
+        >
+          ◀ タイトルへ戻る
+        </button>
+      </div>
+
+      <div className="text-center pt-12">
         <div className={`inline-block px-6 py-2 rounded-full font-bold shadow-lg mb-2 ${winner ? 'bg-yellow-500' : swapAbilityState ? 'bg-indigo-600' : phase === 'playing' ? (currentPlayer === 'player1' ? 'bg-blue-600' : 'bg-red-600') : 'bg-gray-600'}`}>{statusText}</div>
         {mustDropState && <div className="text-red-400 font-bold animate-bounce mt-2">⚠️ 迷惑をかけられています！指定の駒を必ず手持ちから出してください！</div>}
         {turnSkipState[currentPlayer === 'player1' ? 'player2' : 'player1'] && <div className="text-yellow-400 font-bold mb-2 animate-pulse">※相手はペナルティで1回休みです！</div>}
@@ -311,7 +364,6 @@ function App() {
           </div>
         </div>
       )}
-      {/* ------------------------------------------- */}
 
       {swapAbilityState?.step === 'ask' && (
         <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
@@ -529,7 +581,14 @@ function App() {
       )}
       {winner && (
         <div className="absolute inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50">
-          <div className="bg-gray-800 p-8 rounded-xl text-center"><h2 className="text-6xl text-yellow-400 mb-4">{winner.winner === 'player1' ? 'BLUE WIN!' : 'RED WIN!'}</h2><p className="mb-4">{winner.reason}</p><button onClick={resetGame} className="w-full py-3 bg-green-600 rounded text-xl">初めから</button></div>
+          <div className="bg-gray-800 p-8 rounded-xl text-center">
+            <h2 className="text-6xl text-yellow-400 mb-4">{winner.winner === 'player1' ? 'BLUE WIN!' : 'RED WIN!'}</h2>
+            <p className="mb-8 text-xl">{winner.reason}</p>
+            <div className="flex flex-col gap-4">
+              <button onClick={resetGame} className="w-full py-3 bg-green-600 hover:bg-green-500 rounded text-xl font-bold">もう一度遊ぶ</button>
+              <button onClick={handleBackToTitle} className="w-full py-3 bg-gray-600 hover:bg-gray-500 rounded text-xl font-bold">タイトルへ戻る</button>
+            </div>
+          </div>
         </div>
       )}
     </div>
