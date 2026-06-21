@@ -1,16 +1,38 @@
 // @ts-nocheck
 // src/engine/useGameEngine.ts
-import { useReducer } from 'react';
+import { useState, useEffect } from 'react'; // ★ useReducer を useState に戻す
 import type { PlayerId, Position } from '../entities/types';
 import { calculateMovablePositions, getOccupiedPositions, getEffectiveDefinition } from '../rules/movement';
 import { PIECE_DEFINITIONS } from '../data/pieces';
 import { gameReducer, getInitialGameState } from './gameReducer';
+import { socket } from '../network/socket'; // ★ 通信用土管をインポート
 
 export const WOLF_ROLES = ['pawn', 'silver', 'gold', 'lance', 'knight', 'rook', 'bishop'];
 
-export const useGameEngine = () => {
-  // ★ ここが最大の変更点：状態をバラバラのuseStateではなく、1つのReducerで管理する
-  const [state, dispatch] = useReducer(gameReducer, undefined, getInitialGameState);
+// ★ 引数で「オンラインかどうか」「部屋のID」「自分の色」を受け取るようにする
+export const useGameEngine = (appState: string, roomId: string, myPlayerId: PlayerId | null) => {
+  const isOnline = appState === 'online_playing';
+  
+  // 状態管理を useState に変更（オンライン時はサーバーから降ってくるのを待つため）
+  const [state, setState] = useState(getInitialGameState());
+
+  // =========================================================
+  // ★新規追加：サーバーから新しい盤面が届いたら、画面を更新する
+  // =========================================================
+  useEffect(() => {
+    const handleUpdateState = (newState: any) => {
+      setState(newState); // サーバーから届いた最新盤面で上書き！
+    };
+    
+    // ゲーム開始時にも初期盤面を受け取る
+    socket.on('game_start', (data) => setState(data.state));
+    socket.on('update_state', handleUpdateState);
+
+    return () => {
+      socket.off('game_start');
+      socket.off('update_state', handleUpdateState);
+    };
+  }, []);
 
   const {
     phase, pieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, pendingPromotion, winner,
@@ -60,8 +82,23 @@ export const useGameEngine = () => {
     }
   }
 
-  // ★ 盤面クリック時は「Action」を作って dispatch（投函）するだけになる
+  // =========================================================
+  // ★最強の dispatch 関数：オンラインならサーバーへ、ローカルなら自分の画面で計算
+  // =========================================================
+  const dispatch = (action: any) => {
+    if (isOnline) {
+      // オンライン対戦：サーバーに「注文票」を送るだけ！
+      socket.emit('send_action', { roomId, action });
+    } else {
+      // ローカル対戦：今まで通り自分の画面内で即座に計算する
+      setState(prevState => gameReducer(prevState, action));
+    }
+  };
+
   const handleCellClick = (x: number, y: number) => {
+    // ★追加：オンライン対戦時、自分のターンじゃない時は一切の操作を無効化する防御壁
+    if (isOnline && myPlayerId !== currentPlayer) return;
+
     if (wolfDeclaration || accuseState || pendingPromotion || winner || pendingBombActivation || pendingMineConfirmation || swapAbilityState?.step === 'ask' || swapAbilityState?.step === 'confirm') return;
 
     if (phase.startsWith('placement') || phase.startsWith('trap_placement')) {
@@ -167,6 +204,9 @@ export const useGameEngine = () => {
   };
 
   const handleCapturedClick = (pieceId: string) => {
+    // ★追加：オンライン対戦時、自分のターンじゃない時は一切の操作を無効化する防御壁
+    if (isOnline && myPlayerId !== currentPlayer) return;
+
     if (phase !== 'playing' || pendingPromotion || winner || turnState.isSecondMove || wolfDeclaration || accuseState || pendingBombActivation || pendingMineConfirmation || swapAbilityState?.step === 'ask' || swapAbilityState?.step === 'confirm') return;
     if (mustDropState?.playerId === currentPlayer && pieceId !== mustDropState.pieceId) return;
 
@@ -187,7 +227,6 @@ export const useGameEngine = () => {
     }
   };
 
-  // ★ これ以降の関数はすべて、「Actionを発行するだけの伝書鳩」になります
   const resolvePromotion = (doPromote: boolean) => dispatch({ type: 'RESOLVE_PROMOTION', payload: { doPromote } });
   const resolveWolfDeclaration = (roleId: string) => dispatch({ type: 'RESOLVE_WOLF_DECLARATION', payload: { roleId } });
   const resetGame = () => dispatch({ type: 'SYSTEM_RESET_GAME' });
@@ -216,10 +255,11 @@ export const useGameEngine = () => {
 
   const visiblePieces = pieces.filter(p => phase === 'placement_p1' ? p.owner === 'player1' : phase === 'placement_p2' ? p.owner === 'player2' : true);
 
-  return {
+return {
     phase, pieces: visiblePieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, movablePositions, pendingPromotion, winner,
     chohanState, rouletteState, turnState, turnSkipState, wolfDeclaration, accuseState, WOLF_ROLES, turnCount, mustDropState, pendingBombActivation, bulletMinigameData,
     rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState,
+    dispatch, // ★新規追加：App.tsx がタイマー切れ時に操作できるように公開する
     handleCellClick, handleCapturedClick, resolvePromotion, resolveWolfDeclaration, resetGame,
     proceedAccusation, cancelAccusation, resolveAccusation, closeAccusationResult, playChohan, resolveChohan, startRoulette, resolveRoulette, resolveBombActivation, resolveBullet,
     startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation, resolveSwapAbility, resolveGambleJump, cancelGambleJump

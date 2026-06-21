@@ -5,6 +5,8 @@ import { Board } from './components/Board';
 import { Piece as PieceComponent } from './components/Piece';
 import { useGameEngine, WOLF_ROLES } from './engine/useGameEngine';
 import { PIECE_DEFINITIONS } from './data/pieces';
+import { socket } from './network/socket';
+import { getOccupiedPositions } from './rules/movement'; 
 
 const JUMP_TARGETS = Array.from({length: 20}, (_, i) => ({ 
   value: (i % 5) + 1, 
@@ -13,18 +15,89 @@ const JUMP_TARGETS = Array.from({length: 20}, (_, i) => ({
   endAngle: (i + 1) * 18 
 }));
 
+// ★新規追加：相手の操作を待機している間に表示する共通コンポーネント
+const WaitingForOpponent = ({ title, actionName }: { title: string, actionName: string }) => (
+  <div className="text-center py-6">
+    <h2 className="text-2xl font-bold mb-4 text-gray-400">{title}</h2>
+    <p className="text-gray-300">相手が{actionName}しています...</p>
+    <div className="mt-6 text-4xl animate-spin select-none">⏳</div>
+  </div>
+);
+
 function App() {
-  // ★新規追加：アプリ全体の画面状態（タイトルメニューか、ローカル対戦画面か）
-  const [appState, setAppState] = useState<'menu' | 'local'>('menu');
+  const [appState, setAppState] = useState<'menu' | 'local' | 'online_menu' | 'online_playing'>('menu');
+  const [roomIdInput, setRoomIdInput] = useState('');
+  const [onlineStatusMsg, setOnlineStatusMsg] = useState(''); 
+  const [myPlayerId, setMyPlayerId] = useState<'player1' | 'player2' | null>(null);
+  const [placementTimer, setPlacementTimer] = useState<number | null>(null);
 
   const { 
     phase, pieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, movablePositions, pendingPromotion, winner, resetGame,
     chohanState, rouletteState, turnState, turnSkipState, wolfDeclaration, accuseState, turnCount, mustDropState, pendingBombActivation, bulletMinigameData,
     rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState,
+    dispatch, 
     handleCellClick, handleCapturedClick, resolvePromotion, resolveWolfDeclaration, proceedAccusation, cancelAccusation, resolveAccusation, closeAccusationResult, 
     playChohan, resolveChohan, startRoulette, resolveRoulette, resolveBombActivation, resolveBullet,
     startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation, resolveSwapAbility, resolveGambleJump, cancelGambleJump
-  } = useGameEngine();
+  } = useGameEngine(appState, roomIdInput, myPlayerId);
+
+  // ★新規追加：現在操作権限があるかどうかを判定するフラグ
+  const isMyTurn = appState === 'local' || currentPlayer === myPlayerId;
+
+  const activeQueue = phase === 'placement_p1' ? p1Queue : phase === 'placement_p2' ? p2Queue : phase === 'trap_placement_p1' ? p1TrapQueue : phase === 'trap_placement_p2' ? p2TrapQueue : [];
+  const nextPieceId = activeQueue[0];
+  const nextPieceName = nextPieceId ? PIECE_DEFINITIONS[nextPieceId]?.name : '';
+
+  useEffect(() => {
+    const isPlacement = phase.startsWith('placement') || phase.startsWith('trap_placement');
+    if (appState === 'online_playing' && isPlacement && isMyTurn && activeQueue.length > 0) {
+      setPlacementTimer(myPlayerId === 'player1' ? 15 : 10);
+    } else {
+      setPlacementTimer(null);
+    }
+  }, [phase, currentPlayer, myPlayerId, appState, activeQueue.length]);
+
+  useEffect(() => {
+    if (placementTimer === null) return;
+    
+    if (placementTimer > 0) {
+      const timerId = setTimeout(() => setPlacementTimer(placementTimer - 1), 1000);
+      return () => clearTimeout(timerId);
+    } else if (placementTimer === 0) {
+      const isTrapPhase = phase.startsWith('trap');
+      const defId = activeQueue[0];
+      
+      let validPositions: {x: number, y: number}[] = [];
+      for (let x = 0; x < 5; x++) {
+        for (let y = 0; y < 5; y++) {
+          let canPlace = false;
+          if (isTrapPhase) {
+            if (currentPlayer === 'player1' && y >= 2) canPlace = true;
+            if (currentPlayer === 'player2' && y <= 2) canPlace = true;
+          } else {
+            if (y === (currentPlayer === 'player1' ? 4 : 0)) canPlace = true;
+          }
+          
+          if (canPlace && !pieces.some(p => getOccupiedPositions(p).some(pos => pos.x === x && pos.y === y))) {
+            validPositions.push({ x, y });
+          }
+        }
+      }
+      
+      if (validPositions.length > 0) {
+        const randPos = validPositions[Math.floor(Math.random() * validPositions.length)];
+        const payload: any = { activePlayer: currentPlayer, defId, x: randPos.x, y: randPos.y, isTrapPhase };
+        
+        if (defId === 'wolf') {
+          payload.wolfMimicRole = WOLF_ROLES[Math.floor(Math.random() * WOLF_ROLES.length)];
+        }
+        
+        dispatch({ type: 'PLACE_INITIAL_PIECE', payload });
+        dispatch({ type: 'SET_WOLF_DECLARATION', payload: null });
+      }
+      setPlacementTimer(null);
+    }
+  }, [placementTimer, activeQueue, phase, currentPlayer, pieces, dispatch]);
 
   const [rotationAngle, setRotationAngle] = useState(0);
   const [isSpinning, setIsSpinning] = useState(false);
@@ -39,6 +112,37 @@ function App() {
 
   const jumpAngleRef = useRef(0);
   const jumpIsSpinningRef = useRef(false);
+
+  useEffect(() => {
+    socket.connect();
+
+    socket.on('error_message', (msg) => {
+      alert(`エラー: ${msg}`);
+      setOnlineStatusMsg('');
+    });
+
+    socket.on('room_created', (data) => {
+      setOnlineStatusMsg(`部屋 [${data.roomId}] を作成しました。対戦相手を待っています...`);
+      setMyPlayerId(data.playerId);
+    });
+
+    socket.on('room_joined', (data) => {
+      setOnlineStatusMsg(`部屋 [${data.roomId}] に接続しました！`);
+      setMyPlayerId(data.playerId); 
+    });
+
+    socket.on('game_start', (data) => {
+      alert(data.message);
+      setAppState('online_playing'); 
+    });
+
+    return () => {
+      socket.off('error_message');
+      socket.off('room_created');
+      socket.off('room_joined');
+      socket.off('game_start');
+    };
+  }, []);
 
   useEffect(() => {
     if (phase === 'minigame_gamble_jump') {
@@ -150,30 +254,34 @@ function App() {
     return () => clearInterval(timerId);
   }, [phase, rendaSettingState?.isActive, rendaSettingState?.timeLeft, rendaPlayState?.isActive, rendaPlayState?.timeLeft]);
 
+  const handleCreateRoom = () => {
+    if (!roomIdInput) return alert('合言葉を入力してください');
+    socket.emit('create_room', roomIdInput);
+  };
+
+  const handleJoinRoom = () => {
+    if (!roomIdInput) return alert('合言葉を入力してください');
+    socket.emit('join_room', roomIdInput);
+  };
+
   const handleBackToTitle = () => {
     resetGame();
     setAppState('menu');
+    setOnlineStatusMsg('');
+    setMyPlayerId(null);
   };
 
-  // ============================================================================
-  // ★新規追加：タイトルメニュー画面
-  // ============================================================================
   if (appState === 'menu') {
     return (
       <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center font-sans relative overflow-hidden">
-        {/* 背景の装飾 */}
         <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 pointer-events-none opacity-20">
           <div className="absolute w-96 h-96 bg-blue-600 rounded-full blur-[100px] -top-20 -left-20"></div>
           <div className="absolute w-96 h-96 bg-red-600 rounded-full blur-[100px] top-1/2 right-10"></div>
         </div>
 
         <div className="z-10 text-center max-w-2xl px-4">
-          <h1 className="text-6xl md:text-7xl font-black mb-4 tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-400 to-red-400 drop-shadow-lg">
-            将棋の新弾
-          </h1>
-          <p className="text-xl md:text-2xl font-bold text-gray-300 mb-8 tracking-widest">
-            非公式ファンゲーム
-          </p>
+          <h1 className="text-6xl md:text-7xl font-black mb-4 tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-400 to-red-400 drop-shadow-lg">将棋の新弾</h1>
+          <p className="text-xl md:text-2xl font-bold text-gray-300 mb-8 tracking-widest">非公式ファンゲーム</p>
 
           <div className="bg-gray-800 bg-opacity-80 border border-yellow-600/50 p-6 rounded-2xl text-xs md:text-sm text-yellow-100 text-left mb-12 shadow-2xl backdrop-blur-sm leading-relaxed">
             <p className="font-bold text-yellow-400 mb-2 text-base">⚠️ 二次創作に関するガイドラインへの配慮</p>
@@ -198,14 +306,12 @@ function App() {
             </button>
 
             <button 
-              disabled 
-              className="w-full py-5 bg-gray-800 rounded-2xl font-bold text-2xl text-gray-500 border-2 border-gray-700 cursor-not-allowed relative overflow-hidden"
+              onClick={() => setAppState('online_menu')} 
+              className="group relative w-full py-5 bg-gradient-to-r from-green-600 to-emerald-500 hover:from-green-500 hover:to-emerald-400 rounded-2xl font-bold text-2xl shadow-[0_0_20px_rgba(16,185,129,0.4)] hover:shadow-[0_0_30px_rgba(16,185,129,0.6)] transform transition-all hover:-translate-y-1 overflow-hidden"
             >
-              {/* ストライプ模様のCSSハック */}
-              <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 10px, #000 10px, #000 20px)' }}></div>
               <div className="relative z-10 flex flex-col items-center justify-center">
                 <span className="text-3xl mb-1">🌐 オンライン対戦</span>
-                <span className="text-sm font-bold text-yellow-500 animate-pulse">🚧 開発中 🚧</span>
+                <span className="text-sm font-normal text-green-100">合言葉を決めて遠隔で対戦する</span>
               </div>
             </button>
           </div>
@@ -214,9 +320,45 @@ function App() {
     );
   }
 
-  // ============================================================================
-  // ローカル対戦画面（既存のUI）
-  // ============================================================================
+  if (appState === 'online_menu') {
+    return (
+      <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center font-sans relative overflow-hidden">
+        <button onClick={handleBackToTitle} className="absolute top-4 left-4 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-lg text-sm font-bold shadow-lg shadow-black/50 transition-colors flex items-center gap-2 z-20">
+          ◀ タイトルへ戻る
+        </button>
+        
+        <div className="bg-gray-800 p-8 rounded-2xl shadow-2xl border border-green-500 w-full max-w-md text-center z-10 backdrop-blur-sm bg-opacity-95">
+          <h2 className="text-3xl font-bold mb-6 text-green-400 tracking-wide flex items-center justify-center gap-2">
+            <span>🌐</span> オンライン対戦
+          </h2>
+          
+          {onlineStatusMsg ? (
+            <div className="py-12 flex flex-col items-center justify-center">
+              <div className="text-6xl mb-6 animate-spin select-none">⏳</div>
+              <p className="text-xl font-bold text-yellow-400 animate-pulse bg-gray-900/50 px-4 py-3 rounded-xl border border-yellow-600/30 w-full">{onlineStatusMsg}</p>
+              <button onClick={() => setOnlineStatusMsg('')} className="mt-8 text-sm text-gray-400 underline hover:text-white">キャンセルして入力に戻る</button>
+            </div>
+          ) : (
+            <>
+              <p className="text-gray-300 mb-6 text-sm leading-relaxed">友達と同じ「合言葉」を入力してマッチングします。</p>
+              <input 
+                type="text" 
+                placeholder="合言葉を入力 (例: banana123)" 
+                value={roomIdInput}
+                onChange={(e) => setRoomIdInput(e.target.value)}
+                className="w-full p-4 mb-6 rounded-xl bg-gray-900 border-2 border-gray-700 text-xl font-bold text-center focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-none transition-all placeholder-gray-600 text-green-400 tracking-wider"
+              />
+              <div className="flex gap-4">
+                <button onClick={handleCreateRoom} className="flex-1 py-4 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold text-lg shadow-lg shadow-blue-900/30 transform active:scale-95 transition-all">部屋を作る</button>
+                <button onClick={handleJoinRoom} className="flex-1 py-4 bg-red-600 hover:bg-red-500 rounded-xl font-bold text-lg shadow-lg shadow-red-900/30 transform active:scale-95 transition-all">部屋に入る</button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   let statusText = '';
   if (winner) statusText = 'ゲーム終了！';
   else if (phase === 'placement_p1') statusText = '【配置】Player 1 (青) : 一番手前の列に駒を置いてください';
@@ -228,19 +370,16 @@ function App() {
   else if (swapAbilityState?.step === 'selecting_target') statusText = '【能力】入れ替える自陣の駒を選択してください';
   else statusText = `Turn ${turnCount}: ${currentPlayer === 'player1' ? 'Player 1 (青)' : 'Player 2 (赤)'}`;
 
-  const activeQueue = phase === 'placement_p1' ? p1Queue : phase === 'placement_p2' ? p2Queue : phase === 'trap_placement_p1' ? p1TrapQueue : phase === 'trap_placement_p2' ? p2TrapQueue : [];
-  const nextPieceId = activeQueue[0];
-  const nextPieceName = nextPieceId ? PIECE_DEFINITIONS[nextPieceId]?.name : '';
-
   const p1Cap = capturedPieces.filter(p => p.owner === 'player1');
   const p2Cap = capturedPieces.filter(p => p.owner === 'player2');
   const selectedPieceObj = pieces.find(p => p.id === selectedPieceId);
   const canSpinRoulette = selectedPieceObj && PIECE_DEFINITIONS[selectedPieceObj.definitionId]?.tags?.includes('can_spin_roulette');
   const isMyPenaltyTurn = mustDropState?.playerId === currentPlayer;
 
+  const myPlayerLabel = appState === 'online_playing' ? (myPlayerId === 'player1' ? '【あなたは Player 1 (青) です】' : '【あなたは Player 2 (赤) です】') : '';
+
   return (
     <div className="min-h-screen bg-gray-900 text-white font-sans relative pb-10 overflow-hidden pt-4">
-      {/* ★新規追加：タイトルへ戻るボタン */}
       <div className="absolute top-4 left-4 z-20">
         <button 
           onClick={handleBackToTitle} 
@@ -251,7 +390,17 @@ function App() {
       </div>
 
       <div className="text-center pt-12">
+        {myPlayerLabel && <div className={`font-bold mb-2 ${myPlayerId === 'player1' ? 'text-blue-400' : 'text-red-400'}`}>{myPlayerLabel}</div>}
+        
         <div className={`inline-block px-6 py-2 rounded-full font-bold shadow-lg mb-2 ${winner ? 'bg-yellow-500' : swapAbilityState ? 'bg-indigo-600' : phase === 'playing' ? (currentPlayer === 'player1' ? 'bg-blue-600' : 'bg-red-600') : 'bg-gray-600'}`}>{statusText}</div>
+        {appState === 'online_playing' && <div className="text-xs text-green-400 font-semibold mb-2">📡 オンライン同期中</div>}
+        
+        {placementTimer !== null && (
+          <div className="mb-2 text-xl font-bold text-red-400 animate-pulse bg-gray-800 inline-block px-6 py-2 rounded-lg border border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)]">
+            ⏱ 残り時間: {placementTimer} 秒
+          </div>
+        )}
+
         {mustDropState && <div className="text-red-400 font-bold animate-bounce mt-2">⚠️ 迷惑をかけられています！指定の駒を必ず手持ちから出してください！</div>}
         {turnSkipState[currentPlayer === 'player1' ? 'player2' : 'player1'] && <div className="text-yellow-400 font-bold mb-2 animate-pulse">※相手はペナルティで1回休みです！</div>}
         {phase.startsWith('placement') || phase.startsWith('trap_placement') ? (
@@ -265,7 +414,7 @@ function App() {
             </div>
           )
         ) : null}
-        {canSpinRoulette && phase === 'playing' && !turnState.isSecondMove && (
+        {canSpinRoulette && phase === 'playing' && !turnState.isSecondMove && isMyTurn && (
           <div className="mt-4"><button onClick={startRoulette} className="px-6 py-3 bg-purple-600 hover:bg-purple-500 rounded-full font-bold shadow-lg animate-bounce border-2 border-purple-300">🎲 運命のルーレットを回す</button></div>
         )}
       </div>
@@ -340,27 +489,31 @@ function App() {
             </div>
             
             <div className="flex flex-col gap-3">
-              {(jumpStep === 'spinX' || jumpStep === 'spinY') ? (
-                <button 
-                  onClick={handleStopJump} 
-                  disabled={!jumpIsSpinning}
-                  className={`px-8 py-3 rounded font-bold text-xl w-full ${jumpIsSpinning ? 'bg-red-600 hover:bg-red-500' : 'bg-red-900 text-gray-400'}`}
-                >
-                  STOP!
-                </button>
-              ) : jumpStep === 'result' ? (
-                <button 
-                  onClick={() => resolveGambleJump((jumpResultX || 1) - 1, (jumpResultY || 1) - 1)} 
-                  className="px-8 py-3 bg-blue-600 hover:bg-blue-500 rounded font-bold text-xl w-full animate-pulse"
-                >
-                  転移する！
-                </button>
-              ) : null}
+              {!isMyTurn ? <WaitingForOpponent title="相手のターン" actionName="転移先を決定" /> : (
+                <>
+                  {(jumpStep === 'spinX' || jumpStep === 'spinY') ? (
+                    <button 
+                      onClick={handleStopJump} 
+                      disabled={!jumpIsSpinning}
+                      className={`px-8 py-3 rounded font-bold text-xl w-full ${jumpIsSpinning ? 'bg-red-600 hover:bg-red-500' : 'bg-red-900 text-gray-400'}`}
+                    >
+                      STOP!
+                    </button>
+                  ) : jumpStep === 'result' ? (
+                    <button 
+                      onClick={() => resolveGambleJump((jumpResultX || 1) - 1, (jumpResultY || 1) - 1)} 
+                      className="px-8 py-3 bg-blue-600 hover:bg-blue-500 rounded font-bold text-xl w-full animate-pulse"
+                    >
+                      転移する！
+                    </button>
+                  ) : null}
 
-              {jumpStep === 'spinX' && jumpResultX === null && (
-                <button onClick={cancelGambleJump} className="px-8 py-2 bg-gray-600 hover:bg-gray-500 rounded font-bold text-md w-full">
-                  やめる
-                </button>
+                  {jumpStep === 'spinX' && jumpResultX === null && (
+                    <button onClick={cancelGambleJump} className="px-8 py-2 bg-gray-600 hover:bg-gray-500 rounded font-bold text-md w-full">
+                      やめる
+                    </button>
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -372,10 +525,12 @@ function App() {
           <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-2 border-white max-w-md w-full">
             <h2 className="text-3xl font-bold mb-4 text-white">白の賢人</h2>
             <p className="mb-6 text-gray-300 text-lg">自陣の駒と位置を入れ替える能力を使いますか？</p>
-            <div className="flex gap-4 justify-center">
-              <button onClick={() => resolveSwapAbility('yes')} className="px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded font-bold text-lg">はい（能力を使う）</button>
-              <button onClick={() => resolveSwapAbility('no')} className="px-6 py-3 bg-gray-600 hover:bg-gray-500 rounded font-bold text-lg">いいえ（通常移動）</button>
-            </div>
+            {!isMyTurn ? <WaitingForOpponent title="相手のターン" actionName="能力の使用を選択" /> : (
+              <div className="flex gap-4 justify-center">
+                <button onClick={() => resolveSwapAbility('yes')} className="px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded font-bold text-lg">はい（能力を使う）</button>
+                <button onClick={() => resolveSwapAbility('no')} className="px-6 py-3 bg-gray-600 hover:bg-gray-500 rounded font-bold text-lg">いいえ（通常移動）</button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -388,10 +543,12 @@ function App() {
               「{PIECE_DEFINITIONS[pieces.find(p => p.id === swapAbilityState.targetPieceId)?.definitionId || '']?.name}」と本当に入れ替えますか？<br/>
               <span className="text-sm text-gray-400 mt-2 block">入れ替え後、白の賢人は行動不能になります。</span>
             </p>
-            <div className="flex gap-4 justify-center">
-              <button onClick={() => resolveSwapAbility('confirm_yes')} className="px-6 py-3 bg-red-600 hover:bg-red-500 rounded font-bold text-lg">はい</button>
-              <button onClick={() => resolveSwapAbility('confirm_no')} className="px-6 py-3 bg-gray-600 hover:bg-gray-500 rounded font-bold text-lg">やめる</button>
-            </div>
+            {!isMyTurn ? <WaitingForOpponent title="相手のターン" actionName="対象を選択" /> : (
+              <div className="flex gap-4 justify-center">
+                <button onClick={() => resolveSwapAbility('confirm_yes')} className="px-6 py-3 bg-red-600 hover:bg-red-500 rounded font-bold text-lg">はい</button>
+                <button onClick={() => resolveSwapAbility('confirm_no')} className="px-6 py-3 bg-gray-600 hover:bg-gray-500 rounded font-bold text-lg">やめる</button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -401,10 +558,12 @@ function App() {
           <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-2 border-yellow-500 max-w-md w-full">
             <h2 className="text-3xl font-bold mb-4 text-yellow-400">⚠️ 味方の地雷</h2>
             <p className="mb-6 text-gray-300 text-lg">進行方向に味方の地雷があります。<br/>通過・配置すると地雷は破壊されますが、よろしいですか？</p>
-            <div className="flex gap-4 justify-center">
-              <button onClick={() => resolveMineConfirmation(true)} className="px-6 py-3 bg-red-600 hover:bg-red-500 rounded font-bold text-lg">はい（破壊して進む）</button>
-              <button onClick={() => resolveMineConfirmation(false)} className="px-6 py-3 bg-gray-600 hover:bg-gray-500 rounded font-bold text-lg">やめる</button>
-            </div>
+            {!isMyTurn ? <WaitingForOpponent title="相手のターン" actionName="地雷の破壊を確認" /> : (
+              <div className="flex gap-4 justify-center">
+                <button onClick={() => resolveMineConfirmation(true)} className="px-6 py-3 bg-red-600 hover:bg-red-500 rounded font-bold text-lg">はい（破壊して進む）</button>
+                <button onClick={() => resolveMineConfirmation(false)} className="px-6 py-3 bg-gray-600 hover:bg-gray-500 rounded font-bold text-lg">やめる</button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -418,7 +577,9 @@ function App() {
               {rouletteState === 'lose' && <div className="text-4xl text-red-500 animate-pulse">💀 特殊敗北 💀</div>}
               {rouletteState === 'miss' && <div className="text-4xl text-gray-400">💨 はずれ（ターン終了）</div>}
             </div>
-            <button onClick={resolveRoulette} className="px-8 py-3 bg-blue-600 hover:bg-blue-500 rounded font-bold w-full">結果を受け入れる</button>
+            {!isMyTurn ? <WaitingForOpponent title="相手のターン" actionName="ルーレットの結果を確認" /> : (
+              <button onClick={resolveRoulette} className="px-8 py-3 bg-blue-600 hover:bg-blue-500 rounded font-bold w-full">結果を受け入れる</button>
+            )}
           </div>
         </div>
       )}
@@ -429,13 +590,17 @@ function App() {
             <h2 className={`text-3xl font-bold mb-4 ${phase==='renda_quota_p1' ? 'text-blue-400' : 'text-red-400'}`}>連打妨害！</h2>
             <p className="mb-4 text-gray-300">相手の「連打コマ」の必要ノルマを決めることができます。<br/>2秒間で連打した回数が、1マスあたりの必要回数になります！</p>
             {!rendaSettingState ? (
-              <button onClick={startRendaSetting} className="w-full py-4 bg-purple-600 hover:bg-purple-500 rounded font-bold text-2xl animate-pulse">準備完了 (2秒スタート)</button>
+              !isMyTurn ? <WaitingForOpponent title="相手のターン" actionName="連打妨害の準備を" /> : (
+                <button onClick={startRendaSetting} className="w-full py-4 bg-purple-600 hover:bg-purple-500 rounded font-bold text-2xl animate-pulse">準備完了 (2秒スタート)</button>
+              )
             ) : (
               <>
                 <div className="text-6xl font-black mb-6 text-yellow-400">{rendaSettingState.clicks} 回</div>
                 <div className="text-xl mb-4">残り: <span className="font-bold text-2xl text-red-400">{rendaSettingState.timeLeft}</span> 秒</div>
                 {rendaSettingState.isActive ? (
-                  <button onClick={clickRendaSetting} className="w-full py-10 bg-red-600 active:bg-red-800 rounded-xl font-black text-4xl shadow-inner select-none">ここを連打しろ！</button>
+                  !isMyTurn ? <div className="mt-6 text-xl font-bold text-yellow-400 animate-pulse">🔥 相手が連打でノルマを叩き出しています！ 🔥</div> : (
+                    <button onClick={clickRendaSetting} className="w-full py-10 bg-red-600 active:bg-red-800 rounded-xl font-black text-4xl shadow-inner select-none">ここを連打しろ！</button>
+                  )
                 ) : (
                   <div className="text-2xl text-green-400 font-bold">終了！</div>
                 )}
@@ -462,12 +627,16 @@ function App() {
               </div>
             </div>
             {!rendaPlayState.isActive && rendaPlayState.timeLeft === 3 ? (
-              <button onClick={startRendaPlay} className="w-full py-4 bg-yellow-600 hover:bg-yellow-500 rounded font-bold text-2xl animate-pulse">スタート！</button>
+              !isMyTurn ? <WaitingForOpponent title="相手のターン" actionName="連打の準備を" /> : (
+                <button onClick={startRendaPlay} className="w-full py-4 bg-yellow-600 hover:bg-yellow-500 rounded font-bold text-2xl animate-pulse">スタート！</button>
+              )
             ) : (
               <>
                 <div className="text-xl mb-4">残り: <span className="font-bold text-2xl text-red-400">{rendaPlayState.timeLeft}</span> 秒</div>
                 {rendaPlayState.isActive ? (
-                  <button onClick={clickRendaPlay} className="w-full py-10 bg-red-600 active:bg-red-800 rounded-xl font-black text-4xl shadow-inner select-none">連打！連打！</button>
+                  !isMyTurn ? <div className="mt-6 text-xl font-bold text-blue-400 animate-pulse">🔥 相手が猛烈に連打しています！ 🔥</div> : (
+                    <button onClick={clickRendaPlay} className="w-full py-10 bg-red-600 active:bg-red-800 rounded-xl font-black text-4xl shadow-inner select-none">連打！連打！</button>
+                  )
                 ) : (
                   <div className={`text-2xl font-bold ${rendaPlayState.clicks >= rendaPlayState.required ? 'text-green-400' : 'text-gray-500'}`}>
                     {rendaPlayState.clicks >= rendaPlayState.required ? '成功！' : '失敗...'}
@@ -508,18 +677,22 @@ function App() {
                </div>
             </div>
             
-            {isSpinning ? (
-              <button onClick={handleStopBullet} className="w-full py-4 bg-red-600 hover:bg-red-500 rounded font-bold text-2xl animate-pulse">STOP!</button>
-            ) : (
+            {!isMyTurn ? <div className="mt-4 text-xl text-gray-400 font-bold animate-pulse">相手が狙いを定めています...</div> : (
               <>
-                <div className="mb-4">
-                  {bulletResult?.targetId ? (
-                    <div className="text-green-400 text-xl font-bold">命中！！ 敵の「{bulletResult.label}」を撃ち抜いた！</div>
-                  ) : (
-                    <div className="text-red-400 text-xl font-bold">ハズレ... 弾は外れた</div>
-                  )}
-                </div>
-                <button onClick={() => resolveBullet(bulletResult?.targetId || null)} className="w-full py-3 bg-blue-600 hover:bg-blue-500 rounded font-bold text-lg">結果を確定</button>
+                {isSpinning ? (
+                  <button onClick={handleStopBullet} className="w-full py-4 bg-red-600 hover:bg-red-500 rounded font-bold text-2xl animate-pulse">STOP!</button>
+                ) : (
+                  <>
+                    <div className="mb-4">
+                      {bulletResult?.targetId ? (
+                        <div className="text-green-400 text-xl font-bold">命中！！ 敵の「{bulletResult.label}」を撃ち抜いた！</div>
+                      ) : (
+                        <div className="text-red-400 text-xl font-bold">ハズレ... 弾は外れた</div>
+                      )}
+                    </div>
+                    <button onClick={() => resolveBullet(bulletResult?.targetId || null)} className="w-full py-3 bg-blue-600 hover:bg-blue-500 rounded font-bold text-lg">結果を確定</button>
+                  </>
+                )}
               </>
             )}
           </div>
@@ -531,7 +704,12 @@ function App() {
           <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-2 border-yellow-500 max-w-md w-full">
             <h2 className="text-3xl font-bold mb-4 text-yellow-400">💣 爆弾起動</h2>
             <p className="mb-6 text-gray-300">2ターン後に自分と周囲8マスを吹き飛ばす時限爆弾を起動しますか？</p>
-            <div className="flex gap-4 justify-center"><button onClick={() => resolveBombActivation(true)} className="px-6 py-3 bg-red-600 hover:bg-red-500 rounded font-bold text-lg">起動する</button><button onClick={() => resolveBombActivation(false)} className="px-6 py-3 bg-gray-600 hover:bg-gray-500 rounded font-bold text-lg">しない</button></div>
+            {!isMyTurn ? <WaitingForOpponent title="相手のターン" actionName="爆弾の起動を選択" /> : (
+              <div className="flex gap-4 justify-center">
+                <button onClick={() => resolveBombActivation(true)} className="px-6 py-3 bg-red-600 hover:bg-red-500 rounded font-bold text-lg">起動する</button>
+                <button onClick={() => resolveBombActivation(false)} className="px-6 py-3 bg-gray-600 hover:bg-gray-500 rounded font-bold text-lg">しない</button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -540,7 +718,11 @@ function App() {
         <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
           <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-2 border-gray-500 max-w-md w-full">
             <h2 className="text-2xl font-bold mb-4">狼の能力を選択</h2>
-            <div className="grid grid-cols-3 gap-4">{WOLF_ROLES.map(role => <button key={role} onClick={() => resolveWolfDeclaration(role)} className="py-3 bg-gray-600 hover:bg-gray-500 rounded font-bold text-xl">{PIECE_DEFINITIONS[role].name}</button>)}</div>
+            {!isMyTurn ? <WaitingForOpponent title="相手のターン" actionName="狼の変装先を決定" /> : (
+              <div className="grid grid-cols-3 gap-4">
+                {WOLF_ROLES.map(role => <button key={role} onClick={() => resolveWolfDeclaration(role)} className="py-3 bg-gray-600 hover:bg-gray-500 rounded font-bold text-xl">{PIECE_DEFINITIONS[role].name}</button>)}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -548,10 +730,14 @@ function App() {
       {accuseState && (
         <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
           <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-2 border-red-500 max-w-md w-full">
-            {accuseState.step === 'confirm' && (<><h2 className="text-2xl font-bold mb-4 text-red-400">敵の正体を指摘しますか？</h2><div className="flex gap-4 justify-center"><button onClick={cancelAccusation} className="px-6 py-2 bg-gray-600 rounded">やめる</button><button onClick={() => proceedAccusation('select')} className="px-6 py-2 bg-red-600 rounded">はい</button></div></>)}
-            {accuseState.step === 'select' && (<><div className="grid grid-cols-3 gap-4 mb-6">{WOLF_ROLES.map(role => <button key={role} onClick={() => proceedAccusation('final', role)} className="py-3 bg-gray-600 rounded">{PIECE_DEFINITIONS[role].name}</button>)}</div></>)}
-            {accuseState.step === 'final' && (<><h2 className="text-2xl font-bold mb-4 text-yellow-400">最終確認：{PIECE_DEFINITIONS[accuseState.guessedRole!].name}</h2><div className="flex flex-col gap-3"><button onClick={resolveAccusation} className="py-3 bg-red-600 rounded font-bold text-lg">覚悟を決めて指摘する</button><button onClick={() => proceedAccusation('select')} className="py-2 bg-gray-600 rounded">考え直す</button></div></>)}
-            {accuseState.step === 'result' && (<><h2 className={`text-3xl font-bold mb-6 ${accuseState.isSuccess ? 'text-green-400' : 'text-red-500'}`}>{accuseState.isSuccess ? '成功！' : '失敗...'}</h2><button onClick={closeAccusationResult} className="w-full py-3 bg-blue-600 rounded font-bold">確認</button></>)}
+            {!isMyTurn ? <WaitingForOpponent title="相手のターン" actionName="正体の指摘を確認" /> : (
+              <>
+                {accuseState.step === 'confirm' && (<><h2 className="text-2xl font-bold mb-4 text-red-400">敵の正体を指摘しますか？</h2><div className="flex gap-4 justify-center"><button onClick={cancelAccusation} className="px-6 py-2 bg-gray-600 rounded">やめる</button><button onClick={() => proceedAccusation('select')} className="px-6 py-2 bg-red-600 rounded">はい</button></div></>)}
+                {accuseState.step === 'select' && (<><div className="grid grid-cols-3 gap-4 mb-6">{WOLF_ROLES.map(role => <button key={role} onClick={() => proceedAccusation('final', role)} className="py-3 bg-gray-600 rounded">{PIECE_DEFINITIONS[role].name}</button>)}</div></>)}
+                {accuseState.step === 'final' && (<><h2 className="text-2xl font-bold mb-4 text-yellow-400">最終確認：{PIECE_DEFINITIONS[accuseState.guessedRole!].name}</h2><div className="flex flex-col gap-3"><button onClick={resolveAccusation} className="py-3 bg-red-600 rounded font-bold text-lg">覚悟を決めて指摘する</button><button onClick={() => proceedAccusation('select')} className="py-2 bg-gray-600 rounded">考え直す</button></div></>)}
+                {accuseState.step === 'result' && (<><h2 className={`text-3xl font-bold mb-6 ${accuseState.isSuccess ? 'text-green-400' : 'text-red-500'}`}>{accuseState.isSuccess ? '成功！' : '失敗...'}</h2><button onClick={closeAccusationResult} className="w-full py-3 bg-blue-600 rounded font-bold">確認</button></>)}
+              </>
+            )}
           </div>
         </div>
       )}
@@ -560,17 +746,21 @@ function App() {
         <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
           <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-2 border-purple-500 max-w-md w-full">
             <h2 className="text-3xl font-bold mb-6 text-purple-400">{turnState.isSecondMove ? '2回目の行動：丁半' : '丁半博打'}</h2>
-            {!chohanState ? (
-              <div className="flex justify-around"><button onClick={() => playChohan('cho')} className="px-8 py-4 bg-blue-600 rounded text-xl font-bold">丁 (偶数)</button><button onClick={() => playChohan('han')} className="px-8 py-4 bg-red-600 rounded text-xl font-bold">半 (奇数)</button></div>
-            ) : (
+            {!isMyTurn ? <WaitingForOpponent title="相手のターン" actionName="丁半を選択" /> : (
               <>
-                {chohanState.isWin ? <div className="text-green-400 font-bold text-2xl mb-6">勝ち！</div> : <div className="text-red-400 font-bold text-2xl mb-6">負け...（行動失敗）</div>}
-                {chohanState.isWin ? (
-                  <div className="flex flex-col gap-4">
-                    <button onClick={() => resolveChohan(true)} className="px-6 py-3 bg-green-600 rounded font-bold">移動する</button>
-                    {!capturedPieces.some(p => p.id === selectedPieceId) && !turnState.hasDoubledUp && !chohanState.isDoubleUpAttempt && (<><button onClick={() => playChohan('cho', true)} className="py-2 bg-yellow-600 rounded">ダブルアップ (丁)</button><button onClick={() => playChohan('han', true)} className="py-2 bg-yellow-600 rounded">ダブルアップ (半)</button></>)}
-                  </div>
-                ) : ( <button onClick={() => resolveChohan(false)} className="w-full py-3 bg-gray-600 rounded font-bold">ターン終了</button> )}
+                {!chohanState ? (
+                  <div className="flex justify-around"><button onClick={() => playChohan('cho')} className="px-8 py-4 bg-blue-600 rounded text-xl font-bold">丁 (偶数)</button><button onClick={() => playChohan('han')} className="px-8 py-4 bg-red-600 rounded text-xl font-bold">半 (奇数)</button></div>
+                ) : (
+                  <>
+                    {chohanState.isWin ? <div className="text-green-400 font-bold text-2xl mb-6">勝ち！</div> : <div className="text-red-400 font-bold text-2xl mb-6">負け...（行動失敗）</div>}
+                    {chohanState.isWin ? (
+                      <div className="flex flex-col gap-4">
+                        <button onClick={() => resolveChohan(true)} className="px-6 py-3 bg-green-600 rounded font-bold">移動する</button>
+                        {!capturedPieces.some(p => p.id === selectedPieceId) && !turnState.hasDoubledUp && !chohanState.isDoubleUpAttempt && (<><button onClick={() => playChohan('cho', true)} className="py-2 bg-yellow-600 rounded">ダブルアップ (丁)</button><button onClick={() => playChohan('han', true)} className="py-2 bg-yellow-600 rounded">ダブルアップ (半)</button></>)}
+                      </div>
+                    ) : ( <button onClick={() => resolveChohan(false)} className="w-full py-3 bg-gray-600 rounded font-bold">ターン終了</button> )}
+                  </>
+                )}
               </>
             )}
           </div>
@@ -578,7 +768,15 @@ function App() {
       )}
       {pendingPromotion && (
         <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
-          <div className="bg-gray-800 p-6 rounded-lg text-center"><h2 className="text-xl mb-4">成りますか？</h2><button onClick={() => resolvePromotion(true)} className="px-6 py-2 bg-blue-600 mr-4">はい</button><button onClick={() => resolvePromotion(false)} className="px-6 py-2 bg-gray-600">いいえ</button></div>
+          <div className="bg-gray-800 p-6 rounded-lg text-center">
+            <h2 className="text-xl mb-4">成りますか？</h2>
+            {!isMyTurn ? <WaitingForOpponent title="相手のターン" actionName="成りを選択" /> : (
+              <>
+                <button onClick={() => resolvePromotion(true)} className="px-6 py-2 bg-blue-600 mr-4">はい</button>
+                <button onClick={() => resolvePromotion(false)} className="px-6 py-2 bg-gray-600">いいえ</button>
+              </>
+            )}
+          </div>
         </div>
       )}
       {winner && (

@@ -99,8 +99,8 @@ export const resolveCombat = (
     const hitX = clickedPos.x;
     const survivingX = hitX === actualTarget.position.x ? actualTarget.position.x + 1 : actualTarget.position.x;
     nextBoard.push({
-      id: `${actualTarget.owner}_gold_split_${Date.now()}_${Math.random()}`,
-      definitionId: 'gold', owner: actualTarget.owner, position: { x: survivingX, y: actualTarget.position.y }, components: {}
+      id: `${actualTarget.owner}_loser_split_${Date.now()}_${Math.random()}`,
+      definitionId: 'loser', owner: actualTarget.owner, position: { x: survivingX, y: actualTarget.position.y }, components: {}
     });
   }
   else if (actualTargetDef?.tags?.includes('boss_target') || actualTarget.definitionId === 'shield') {

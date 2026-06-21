@@ -13,7 +13,7 @@ const INITIAL_KINGS: Piece[] = [
 ];
 
 const PIECE_POOL = ['pawn', 'silver', 'gold', 'lance', 'rook', 'bishop', 'knight', 'troll', 'trickster', 'wolf', 'hero', 'nuisance', 'bomb', 'landmine', 'bullet', 'drunk', 'renda', 'twins', 'twin_assassin', 'white_sage', 'mushroom', 'shield', 'ghost', 'gamble_jumper', 'anti_promote']; 
-const DEMOTE_MAP: Record<string, string> = { 'tokin': 'pawn', 'promoted_silver': 'silver', 'promoted_lance': 'lance', 'promoted_rook': 'rook', 'promoted_bishop': 'bishop', 'promoted_knight': 'knight', 'promoted_trickster': 'trickster', 'promoted_drunk': 'drunk' , 'promoted_anti_promote': 'anti_promote' };
+const DEMOTE_MAP: Record<string, string> = { 'tokin': 'pawn', 'promoted_silver': 'silver', 'promoted_lance': 'lance', 'promoted_rook': 'rook', 'promoted_bishop': 'bishop', 'promoted_knight': 'knight', 'promoted_trickster': 'trickster', 'promoted_drunk': 'drunk' , 'promoted_anti_promote': 'anti_promote','activated_bomb': 'bomb' };
 
 const resolveNextPlacementPhase = (np1: string[], np2: string[], nt1: string[], nt2: string[], board: Piece[], cap: Piece[]) => {
   if (np1.length > 0) return { phase: 'placement_p1', player: 'player1' };
@@ -81,9 +81,9 @@ const handleTurnStartEvents = (state: GameState, nextPlayer: PlayerId, currentBo
     return { ...p, components: newComps };
   });
 
-  const explodingBombs = nextBoard.filter(p => p.owner === nextPlayer && p.definitionId === 'bomb' && p.components?.isActivated && (p.components.bombTimer || 0) <= 1);
+  const explodingBombs = nextBoard.filter(p => p.owner === nextPlayer && (p.definitionId === 'bomb' || p.definitionId === 'activated_bomb') && p.components?.isActivated && (p.components.bombTimer || 0) <= 1);
   nextBoard = nextBoard.map(p => {
-    if (p.owner === nextPlayer && p.definitionId === 'bomb' && p.components?.isActivated) {
+    if (p.owner === nextPlayer && (p.definitionId === 'bomb' || p.definitionId === 'activated_bomb') && p.components?.isActivated) {
       return { ...p, components: { ...p.components, bombTimer: p.components.bombTimer - 1 } };
     }
     return p;
@@ -151,7 +151,7 @@ const executeMove = (state: GameState, payload: { pieceId: string, to: Position,
   let lastActionData: any = null;
   let promotionCanceled = false; 
 
-  const { pieceId, to, isDrop, skipTurnChange = false, wolfMimicRole, newUseCount, destroyedAllyMineIds } = payload;
+  let { pieceId, to, isDrop, skipTurnChange = false, wolfMimicRole, newUseCount, destroyedAllyMineIds } = payload;
   const activePiece = isDrop ? nextCaptured.find(p => p.id === pieceId) : nextPieces.find(p => p.id === pieceId);
   if (!activePiece) return nextState;
 
@@ -308,7 +308,7 @@ const executeMove = (state: GameState, payload: { pieceId: string, to: Position,
             let captured = { ...target };
             if (captured.definitionId === 'wolf') delete captured.components.mimicRole;
             if (captured.definitionId === 'nuisance') captured.definitionId = 'harm';
-            if (captured.definitionId === 'bomb') { captured.components.isActivated = false; captured.components.bombTimer = 0; }
+            if (captured.definitionId === 'bomb'|| captured.definitionId === 'activated_bomb') { captured.components.isActivated = false; captured.components.bombTimer = 0; }
             if (captured.definitionId === 'white_sage') captured.components.isExhausted = false;
             
             const capDef = captured.definitionId;
@@ -398,13 +398,34 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       return getInitialGameState();
     
     case 'PLACE_INITIAL_PIECE': {
-      const { activePlayer, defId, x, y, isTrapPhase } = action.payload;
+      const { activePlayer, defId, x, y, isTrapPhase, wolfMimicRole } = action.payload;
       let nextState = { ...state };
-      const newPieces = [...nextState.pieces, { id: `${activePlayer}_${defId}_${Date.now()}`, definitionId: defId, owner: activePlayer, position: { x, y }, components: { ...(PIECE_DEFINITIONS[defId]?.defaultComponents || {}) } }];
-      nextState.pieces = newPieces;
       
       const isP1 = activePlayer === 'player1';
       let curQ = isTrapPhase ? (isP1 ? nextState.p1TrapQueue : nextState.p2TrapQueue) : (isP1 ? nextState.p1Queue : nextState.p2Queue);
+      
+      let newPieces = [...nextState.pieces];
+
+      if (isTrapPhase) {
+        // ★新規追加：すでにその場所に相手の地雷があるか確認（相殺処理）
+        const existingTrapIndex = newPieces.findIndex(p => p.position.x === x && p.position.y === y && PIECE_DEFINITIONS[p.definitionId]?.tags?.includes('trap'));
+        if (existingTrapIndex !== -1) {
+          // 相殺：新しい地雷は追加せず、既存の地雷も消滅させる
+          newPieces = newPieces.filter((_, idx) => idx !== existingTrapIndex);
+        } else {
+          // 相手の地雷がなければ普通に追加
+          const newPiece = { id: `${activePlayer}_${defId}_${Date.now()}`, definitionId: defId, owner: activePlayer, position: { x, y }, components: { ...(PIECE_DEFINITIONS[defId]?.defaultComponents || {}) } };
+          if (wolfMimicRole) newPiece.components.mimicRole = wolfMimicRole;
+          newPieces.push(newPiece);
+        }
+      } else {
+        const newPiece = { id: `${activePlayer}_${defId}_${Date.now()}`, definitionId: defId, owner: activePlayer, position: { x, y }, components: { ...(PIECE_DEFINITIONS[defId]?.defaultComponents || {}) } };
+        if (wolfMimicRole) newPiece.components.mimicRole = wolfMimicRole;
+        newPieces.push(newPiece);
+      }
+
+      nextState.pieces = newPieces;
+      
       curQ = curQ.slice(1);
       
       if (isTrapPhase) { if(isP1) nextState.p1TrapQueue = curQ; else nextState.p2TrapQueue = curQ; } 
@@ -455,7 +476,7 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       if (!state.pendingBombActivation) return state;
       let nextBoard = [...state.pieces];
       if (action.payload.activate) {
-        nextBoard = nextBoard.map(p => p.id === state.pendingBombActivation!.pieceId ? { ...p, components: { ...p.components, isActivated: true, bombTimer: 2 } } : p);
+        nextBoard = nextBoard.map(p => p.id === state.pendingBombActivation!.pieceId ? { ...p, definitionId: 'activated_bomb', components: { ...p.components, isActivated: true, bombTimer: 2 } } : p);
       }
       let nextState = { ...state, pieces: nextBoard, pendingBombActivation: null, phase: 'playing' };
       nextState = endCurrentTurn(nextState, nextBoard);

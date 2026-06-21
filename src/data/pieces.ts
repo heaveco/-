@@ -46,6 +46,7 @@ export const PIECE_DEFINITIONS: Record<string, PieceDefinition> = {
   nuisance: { id: 'nuisance', name: '迷惑', tags: ['force_drop_if_captured'], moveRules: [{ generator: 'relative', params: [{ dx: -1, dy: -1 }, { dx: 0, dy: -1 }, { dx: 1, dy: -1 }] }] },
   harm: { id: 'harm', name: '成害', tags: ['force_drop_if_captured'], moveRules: [{ generator: 'relative', params: [{ dx: 0, dy: 1 }] }] },
   bomb: { id: 'bomb', name: '爆弾', tags: ['activatable_bomb'], defaultComponents: { isActivated: false, bombTimer: 0 }, moveRules: [{ generator: 'relative', params: [{ dx: 0, dy: -1 }, { dx: 0, dy: 1 }, { dx: -1, dy: 0 }, { dx: 1, dy: 0 }] }] },
+  activated_bomb: { id: 'activated_bomb', name: '起爆', moveRules: [] },
   landmine: { id: 'landmine', name: '地雷', tags: ['invisible_to_enemy', 'trap'], moveRules: [] },
   bullet: { id: 'bullet', name: '弾', tags: ['bullet_minigame', 'start_in_hand'], moveRules: [] },
   drunk: { id: 'drunk', name: '酔', tags: ['pusher', 'cannot_capture'], moveRules: [{ generator: 'straight', params: [{ dx: -1, dy: -1 }, { dx: 1, dy: -1 }, { dx: -1, dy: 1 }, { dx: 1, dy: 1 }] }], promotion: { condition: 'in_enemy_zone', promoteTo: 'promoted_drunk' } },
@@ -74,7 +75,7 @@ export const PIECE_DEFINITIONS: Record<string, PieceDefinition> = {
       { generator: 'relative', params: [{ dx: -1, dy: -1 }, { dx: 1, dy: -1 }, { dx: 0, dy: 1 }, { dx: 0, dy: 1 }] }
     ]
   },
-  loser: { id: 'loser', name: '敗北者', moveRules: [{ generator: 'relative', params: [{ dx: -1, dy: -1 }, { dx: 0, dy: -1 }, { dx: 1, dy: -1 }, { dx: -1, dy: 0 }, { dx: 1, dy: 0 }, { dx: 0, dy: 1 }] }] },
+  loser: { id: 'loser', name: '片割れ', moveRules: [{ generator: 'relative', params: [{ dx: -1, dy: -1 }, { dx: 0, dy: -1 }, { dx: 1, dy: -1 }, { dx: -1, dy: 0 }, { dx: 1, dy: 0 }, { dx: 0, dy: 1 }] }] },
   white_sage: {
     id: 'white_sage',
     name: '白賢',
