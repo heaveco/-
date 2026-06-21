@@ -1,30 +1,22 @@
 // @ts-nocheck
 // src/engine/useGameEngine.ts
-import { useState, useEffect } from 'react'; // ★ useReducer を useState に戻す
+import { useState, useEffect } from 'react'; 
 import type { PlayerId, Position } from '../entities/types';
 import { calculateMovablePositions, getOccupiedPositions, getEffectiveDefinition } from '../rules/movement';
 import { PIECE_DEFINITIONS } from '../data/pieces';
 import { gameReducer, getInitialGameState } from './gameReducer';
-import { socket } from '../network/socket'; // ★ 通信用土管をインポート
+import { socket } from '../network/socket';
 
 export const WOLF_ROLES = ['pawn', 'silver', 'gold', 'lance', 'knight', 'rook', 'bishop'];
 
-// ★ 引数で「オンラインかどうか」「部屋のID」「自分の色」を受け取るようにする
 export const useGameEngine = (appState: string, roomId: string, myPlayerId: PlayerId | null) => {
   const isOnline = appState === 'online_playing';
-  
-  // 状態管理を useState に変更（オンライン時はサーバーから降ってくるのを待つため）
   const [state, setState] = useState(getInitialGameState());
 
-  // =========================================================
-  // ★新規追加：サーバーから新しい盤面が届いたら、画面を更新する
-  // =========================================================
   useEffect(() => {
     const handleUpdateState = (newState: any) => {
-      setState(newState); // サーバーから届いた最新盤面で上書き！
+      setState(newState);
     };
-    
-    // ゲーム開始時にも初期盤面を受け取る
     socket.on('game_start', (data) => setState(data.state));
     socket.on('update_state', handleUpdateState);
 
@@ -37,7 +29,7 @@ export const useGameEngine = (appState: string, roomId: string, myPlayerId: Play
   const {
     phase, pieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, pendingPromotion, winner,
     chohanState, rouletteState, turnState, turnSkipState, wolfDeclaration, accuseState, turnCount, mustDropState, pendingBombActivation, bulletMinigameData,
-    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState, pendingAction
+    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState, pendingAction, ruleSettings // ★追加
   } = state;
 
   const selectedBoardPiece = pieces.find(p => p.id === selectedPieceId);
@@ -259,7 +251,8 @@ return {
     phase, pieces: visiblePieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, movablePositions, pendingPromotion, winner,
     chohanState, rouletteState, turnState, turnSkipState, wolfDeclaration, accuseState, WOLF_ROLES, turnCount, mustDropState, pendingBombActivation, bulletMinigameData,
     rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState,
-    dispatch, // ★新規追加：App.tsx がタイマー切れ時に操作できるように公開する
+    ruleSettings, // ★追加
+    dispatch, 
     handleCellClick, handleCapturedClick, resolvePromotion, resolveWolfDeclaration, resetGame,
     proceedAccusation, cancelAccusation, resolveAccusation, closeAccusationResult, playChohan, resolveChohan, startRoulette, resolveRoulette, resolveBombActivation, resolveBullet,
     startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation, resolveSwapAbility, resolveGambleJump, cancelGambleJump

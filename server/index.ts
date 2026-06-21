@@ -19,6 +19,10 @@ const io = new Server(httpServer, {
 const roomStates = new Map<string, GameState>();
 const roomPlayers = new Map<string, { player1?: string, player2?: string }>();
 
+// ★新規追加：野良対戦用の待機列
+const randomQueueOn: string[] = []; // タイマーあり
+const randomQueueOff: string[] = []; // タイマーなし
+
 const maskState = (state: GameState, playerId: string): GameState => {
   const masked = JSON.parse(JSON.stringify(state)) as GameState;
   
@@ -45,18 +49,30 @@ const maskState = (state: GameState, playerId: string): GameState => {
   return masked;
 };
 
+// 待機列から離脱する関数
+const removeFromRandomQueue = (socketId: string) => {
+  const idxOn = randomQueueOn.indexOf(socketId);
+  if (idxOn > -1) randomQueueOn.splice(idxOn, 1);
+  const idxOff = randomQueueOff.indexOf(socketId);
+  if (idxOff > -1) randomQueueOff.splice(idxOff, 1);
+};
+
 io.on('connection', (socket) => {
   console.log(`🟢 プレイヤー接続: ${socket.id}`);
 
-  socket.on('create_room', (roomId) => {
+  // ★変更：タイマー設定（useTimer）を受け取る
+  socket.on('create_room', ({ roomId, useTimer }) => {
     socket.join(roomId);
-    roomStates.set(roomId, getInitialGameState());
+    
+    const initialState = getInitialGameState();
+    initialState.ruleSettings = { useTurnTimer: useTimer };
+    roomStates.set(roomId, initialState);
     
     const players = roomPlayers.get(roomId) || {};
     players.player1 = socket.id;
     roomPlayers.set(roomId, players);
     
-    console.log(`🏠 部屋 [${roomId}] を作成`);
+    console.log(`🏠 部屋 [${roomId}] (タイマー:${useTimer}) を作成`);
     socket.emit('room_created', { roomId, playerId: 'player1' }); 
   });
 
@@ -68,12 +84,10 @@ io.on('connection', (socket) => {
       socket.emit('error_message', 'その合言葉の部屋は存在しません。');
     } else if (numClients === 1) {
       socket.join(roomId);
-      
       const players = roomPlayers.get(roomId) || {};
       players.player2 = socket.id;
       roomPlayers.set(roomId, players);
 
-      console.log(`🤝 部屋 [${roomId}] でマッチング成立！`);
       socket.emit('room_joined', { roomId, playerId: 'player2' }); 
       
       const initialState = roomStates.get(roomId)!;
@@ -82,6 +96,45 @@ io.on('connection', (socket) => {
     } else {
       socket.emit('error_message', 'その部屋はすでに満員です。');
     }
+  });
+
+  // ★新規追加：野良対戦のマッチング
+  socket.on('join_random', ({ useTimer }) => {
+    const queue = useTimer ? randomQueueOn : randomQueueOff;
+    // 切断済みのプレイヤーを掃除
+    const validQueue = queue.filter(id => io.sockets.sockets.get(id));
+
+    if (validQueue.length > 0) {
+      // マッチング成立！
+      const opponentId = validQueue.shift()!;
+      if (useTimer) randomQueueOn.splice(randomQueueOn.indexOf(opponentId), 1);
+      else randomQueueOff.splice(randomQueueOff.indexOf(opponentId), 1);
+
+      const roomId = `random_${Date.now()}_${Math.random()}`;
+      socket.join(roomId);
+      const opponentSocket = io.sockets.sockets.get(opponentId);
+      if (opponentSocket) opponentSocket.join(roomId);
+
+      const initialState = getInitialGameState();
+      initialState.ruleSettings = { useTurnTimer: useTimer };
+      roomStates.set(roomId, initialState);
+      roomPlayers.set(roomId, { player1: opponentId, player2: socket.id });
+
+      io.to(opponentId).emit('room_created', { roomId, playerId: 'player1' });
+      socket.emit('room_joined', { roomId, playerId: 'player2' });
+
+      io.to(opponentId).emit('game_start', { message: '野良対戦の相手が見つかりました！', state: maskState(initialState, 'player1') });
+      socket.emit('game_start', { message: '野良対戦の相手が見つかりました！', state: maskState(initialState, 'player2') });
+    } else {
+      // 待機列に並ぶ
+      if (useTimer) randomQueueOn.push(socket.id);
+      else randomQueueOff.push(socket.id);
+      socket.emit('waiting_random');
+    }
+  });
+
+  socket.on('leave_random', () => {
+    removeFromRandomQueue(socket.id);
   });
 
   socket.on('send_action', ({ roomId, action }) => {
@@ -102,19 +155,16 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ★新規追加：意図的な退出処理
   socket.on('leave_room', (roomId) => {
     socket.leave(roomId);
-    io.to(roomId).emit('opponent_disconnected'); // 残された側に通知
+    io.to(roomId).emit('opponent_disconnected');
     roomStates.delete(roomId);
     roomPlayers.delete(roomId);
   });
 
-  // ★変更：ブラウザを閉じるなどの不慮の切断時の処理
   socket.on('disconnect', () => {
     console.log(`🔴 プレイヤー切断: ${socket.id}`);
-    
-    // 切断したプレイヤーが参加していた部屋を探し、相手に通知する
+    removeFromRandomQueue(socket.id);
     for (const [roomId, players] of roomPlayers.entries()) {
       if (players.player1 === socket.id || players.player2 === socket.id) {
         io.to(roomId).emit('opponent_disconnected');

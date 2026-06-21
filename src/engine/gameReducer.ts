@@ -53,7 +53,7 @@ export const getInitialGameState = (): GameState => {
   
   const initialData = resolveNextPlacementPhase(p1Q, p2Q, p1TrapQ, p2TrapQ, [...INITIAL_KINGS], cap);
   
-  return {
+return {
     phase: initialData.phase, pieces: [...INITIAL_KINGS], capturedPieces: cap,
     p1Queue: p1Q, p2Queue: p2Q, p1TrapQueue: p1TrapQ, p2TrapQueue: p2TrapQ,
     currentPlayer: initialData.player as PlayerId, selectedPieceId: null, pendingPromotion: null, winner: null,
@@ -62,6 +62,7 @@ export const getInitialGameState = (): GameState => {
     bulletMinigameData: null, pendingMineConfirmation: null,
     turnState: { hasDoubledUp: false, isSecondMove: false }, turnSkipState: { player1: false, player2: false },
     pendingAction: null, chohanState: null, rouletteState: null, wolfDeclaration: null, accuseState: null, swapAbilityState: null,
+    ruleSettings: { useTurnTimer: false } // ★追加
   };
 };
 
@@ -396,15 +397,36 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
   switch (action.type) {
     case 'SYSTEM_RESET_GAME':
       return getInitialGameState();
-      
-      // ★新規追加：投了処理
+
+    // ★新規追加：投了処理
     case 'RESIGN': {
       const loser = action.payload.playerId;
       const winnerPlayer = loser === 'player1' ? 'player2' : 'player1';
       return { 
         ...state, 
-        winner: { winner: winnerPlayer, reason: '相手が投了しました。' } 
+        winner: { winner: winnerPlayer, reason: '投了による決着' },
+        phase: 'finished'
       };
+    }
+
+    // ★新規追加：時間切れによる強制ターンスキップ
+    case 'SKIP_TURN': {
+      let nextState = { ...state };
+      nextState = endCurrentTurn(nextState, nextState.pieces);
+      nextState.selectedPieceId = null;
+      nextState.pendingAction = null;
+      nextState.chohanState = null;
+      nextState.rouletteState = null;
+      nextState.wolfDeclaration = null;
+      nextState.accuseState = null;
+      nextState.swapAbilityState = null;
+      nextState.pendingBombActivation = null;
+      nextState.pendingMineConfirmation = null;
+      nextState.bulletMinigameData = null;
+      nextState.rendaSettingState = null;
+      nextState.rendaPlayState = null;
+      nextState.phase = 'playing';
+      return nextState;
     }
     
     case 'PLACE_INITIAL_PIECE': {

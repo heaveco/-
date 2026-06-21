@@ -1,4 +1,3 @@
-// src/engine/types.ts
 import type { Piece, PlayerId, Position } from '../entities/types';
 import type { VictoryResult } from '../rules/victory';
 
@@ -30,11 +29,13 @@ export interface GameState {
   wolfDeclaration: any | null;
   accuseState: any | null;
   swapAbilityState: { pieceId: string; step: 'ask' | 'selecting_target' | 'confirm'; targetPieceId?: string } | null;
+  // ★新規追加：部屋のルール設定（タイマーの有無など）
+  ruleSettings?: { useTurnTimer: boolean };
 }
 
 export type GameAction = 
   | { type: 'SYSTEM_RESET_GAME' }
-  | { type: 'PLACE_INITIAL_PIECE'; payload: { activePlayer: PlayerId; defId: string; x: number; y: number; isTrapPhase: boolean } }
+  | { type: 'PLACE_INITIAL_PIECE'; payload: { activePlayer: PlayerId; defId: string; x: number; y: number; isTrapPhase: boolean; wolfMimicRole?: string } }
   | { type: 'MOVE_PIECE'; payload: { pieceId: string; to: Position; isDrop: boolean; skipTurnChange?: boolean; wolfMimicRole?: string; newUseCount?: number; destroyedAllyMineIds?: string[] } }
   | { type: 'RESOLVE_MINE_CONFIRMATION'; payload: { proceed: boolean } }
   | { type: 'RESOLVE_BOMB_ACTIVATION'; payload: { activate: boolean } }
@@ -61,7 +62,6 @@ export type GameAction =
   | { type: 'CLICK_RENDA_PLAY' }
   | { type: 'TICK_RENDA_PLAY' }
   | { type: 'FINISH_RENDA_PLAY' }
-  // UI補助アクション
   | { type: 'SET_PHASE'; payload: { phase: string } }
   | { type: 'SET_PENDING_ACTION'; payload: { pieceId: string; to: Position; isDrop: boolean } | null }
   | { type: 'SET_SELECTED_PIECE'; payload: { pieceId: string | null } }
@@ -69,4 +69,7 @@ export type GameAction =
   | { type: 'SET_ACCUSE_STATE'; payload: any | null }
   | { type: 'SET_CHOHAN_STATE'; payload: any | null }
   | { type: 'SET_SWAP_ABILITY_STATE'; payload: any | null }
-  | { type: 'START_BULLET_MINIGAME'; payload: { pieceId: string } };
+  | { type: 'START_BULLET_MINIGAME'; payload: { pieceId: string } }
+  // ★新規追加：投了と時間切れスキップ
+  | { type: 'RESIGN'; payload: { playerId: PlayerId } }
+  | { type: 'SKIP_TURN'; payload: { playerId: PlayerId } };

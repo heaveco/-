@@ -9,13 +9,9 @@ import { socket } from './network/socket';
 import { getOccupiedPositions } from './rules/movement'; 
 
 const JUMP_TARGETS = Array.from({length: 20}, (_, i) => ({ 
-  value: (i % 5) + 1, 
-  color: ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7'][i % 5], 
-  startAngle: i * 18, 
-  endAngle: (i + 1) * 18 
+  value: (i % 5) + 1, color: ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7'][i % 5], startAngle: i * 18, endAngle: (i + 1) * 18 
 }));
 
-// ★新規追加：相手の操作を待機している間に表示する共通コンポーネント
 const WaitingForOpponent = ({ title, actionName }: { title: string, actionName: string }) => (
   <div className="text-center py-6">
     <h2 className="text-2xl font-bold mb-4 text-gray-400">{title}</h2>
@@ -27,46 +23,56 @@ const WaitingForOpponent = ({ title, actionName }: { title: string, actionName: 
 function App() {
   const [appState, setAppState] = useState<'menu' | 'local' | 'online_menu' | 'online_playing'>('menu');
   const [roomIdInput, setRoomIdInput] = useState('');
+  const [useTimerToggle, setUseTimerToggle] = useState(false); // ★タイマーON/OFF用
   const [onlineStatusMsg, setOnlineStatusMsg] = useState(''); 
   const [myPlayerId, setMyPlayerId] = useState<'player1' | 'player2' | null>(null);
+
   const [placementTimer, setPlacementTimer] = useState<number | null>(null);
+  const [turnTimer, setTurnTimer] = useState<number | null>(null); // ★30秒タイマー用
 
   const { 
     phase, pieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, movablePositions, pendingPromotion, winner, resetGame,
     chohanState, rouletteState, turnState, turnSkipState, wolfDeclaration, accuseState, turnCount, mustDropState, pendingBombActivation, bulletMinigameData,
-    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState,
-    dispatch, 
+    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState, ruleSettings, dispatch, 
     handleCellClick, handleCapturedClick, resolvePromotion, resolveWolfDeclaration, proceedAccusation, cancelAccusation, resolveAccusation, closeAccusationResult, 
     playChohan, resolveChohan, startRoulette, resolveRoulette, resolveBombActivation, resolveBullet,
     startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation, resolveSwapAbility, resolveGambleJump, cancelGambleJump
   } = useGameEngine(appState, roomIdInput, myPlayerId);
 
-  // ★新規追加：現在操作権限があるかどうかを判定するフラグ
   const isMyTurn = appState === 'local' || currentPlayer === myPlayerId;
-
   const activeQueue = phase === 'placement_p1' ? p1Queue : phase === 'placement_p2' ? p2Queue : phase === 'trap_placement_p1' ? p1TrapQueue : phase === 'trap_placement_p2' ? p2TrapQueue : [];
   const nextPieceId = activeQueue[0];
   const nextPieceName = nextPieceId ? PIECE_DEFINITIONS[nextPieceId]?.name : '';
 
+  // 1. 配置フェーズのタイマー管理
   useEffect(() => {
     const isPlacement = phase.startsWith('placement') || phase.startsWith('trap_placement');
-    if (appState === 'online_playing' && isPlacement && isMyTurn && activeQueue.length > 0) {
+    if (appState === 'online_playing' && isPlacement && isMyTurn && activeQueue.length > 0 && !winner) {
       setPlacementTimer(myPlayerId === 'player1' ? 15 : 10);
     } else {
       setPlacementTimer(null);
     }
-  }, [phase, currentPlayer, myPlayerId, appState, activeQueue.length]);
+  }, [phase, currentPlayer, myPlayerId, appState, activeQueue.length, winner]);
 
+  // 2. プレイングフェーズ（30秒）のタイマー管理
   useEffect(() => {
-    if (placementTimer === null) return;
-    
-    if (placementTimer > 0) {
-      const timerId = setTimeout(() => setPlacementTimer(placementTimer - 1), 1000);
-      return () => clearTimeout(timerId);
+    const isPlacement = phase.startsWith('placement') || phase.startsWith('trap_placement');
+    if (appState === 'online_playing' && ruleSettings?.useTurnTimer && !isPlacement && isMyTurn && phase === 'playing' && !winner) {
+      setTurnTimer(30);
+    } else {
+      setTurnTimer(null);
+    }
+  }, [phase, currentPlayer, myPlayerId, appState, ruleSettings?.useTurnTimer, turnCount, winner]);
+
+  // 3. タイマーのカウントダウン実行
+  useEffect(() => {
+    if (placementTimer !== null && placementTimer > 0) {
+      const tid = setTimeout(() => setPlacementTimer(placementTimer - 1), 1000);
+      return () => clearTimeout(tid);
     } else if (placementTimer === 0) {
+      // 配置時間切れ：ランダム配置
       const isTrapPhase = phase.startsWith('trap');
       const defId = activeQueue[0];
-      
       let validPositions: {x: number, y: number}[] = [];
       for (let x = 0; x < 5; x++) {
         for (let y = 0; y < 5; y++) {
@@ -77,83 +83,43 @@ function App() {
           } else {
             if (y === (currentPlayer === 'player1' ? 4 : 0)) canPlace = true;
           }
-          
-          if (canPlace && !pieces.some(p => getOccupiedPositions(p).some(pos => pos.x === x && pos.y === y))) {
-            validPositions.push({ x, y });
-          }
+          if (canPlace && !pieces.some(p => getOccupiedPositions(p).some(pos => pos.x === x && pos.y === y))) validPositions.push({ x, y });
         }
       }
-      
       if (validPositions.length > 0) {
         const randPos = validPositions[Math.floor(Math.random() * validPositions.length)];
         const payload: any = { activePlayer: currentPlayer, defId, x: randPos.x, y: randPos.y, isTrapPhase };
-        
-        if (defId === 'wolf') {
-          payload.wolfMimicRole = WOLF_ROLES[Math.floor(Math.random() * WOLF_ROLES.length)];
-        }
-        
+        if (defId === 'wolf') payload.wolfMimicRole = WOLF_ROLES[Math.floor(Math.random() * WOLF_ROLES.length)];
         dispatch({ type: 'PLACE_INITIAL_PIECE', payload });
         dispatch({ type: 'SET_WOLF_DECLARATION', payload: null });
       }
       setPlacementTimer(null);
     }
-  }, [placementTimer, activeQueue, phase, currentPlayer, pieces, dispatch]);
+  }, [placementTimer]);
 
+  useEffect(() => {
+    if (turnTimer !== null && turnTimer > 0) {
+      const tid = setTimeout(() => setTurnTimer(turnTimer - 1), 1000);
+      return () => clearTimeout(tid);
+    } else if (turnTimer === 0) {
+      // ★30秒時間切れ：強制ターンスキップ
+      dispatch({ type: 'SKIP_TURN', payload: { playerId: myPlayerId } });
+      setTurnTimer(null);
+    }
+  }, [turnTimer]);
+
+  // (ルーレット系のuseEffect群は省略せずにそのまま維持)
   const [rotationAngle, setRotationAngle] = useState(0);
   const [isSpinning, setIsSpinning] = useState(false);
   const [bulletResult, setBulletResult] = useState<{ targetId: string | null, label: string } | null>(null);
-
   const [jumpRotationAngle, setJumpRotationAngle] = useState(0);
   const [jumpIsSpinning, setJumpIsSpinning] = useState(false);
   const [jumpStep, setJumpStep] = useState<'idle' | 'spinX' | 'spinY' | 'result'>('idle');
   const [jumpResultX, setJumpResultX] = useState<number | null>(null);
   const [jumpResultY, setJumpResultY] = useState<number | null>(null);
   const [jumpSpeed, setJumpSpeed] = useState(400);
-
   const jumpAngleRef = useRef(0);
   const jumpIsSpinningRef = useRef(false);
-
-// 1. Appコンポーネントの前半部分の useEffect に切断監視を追加
-  useEffect(() => {
-    socket.connect();
-
-    socket.on('error_message', (msg) => {
-      alert(`エラー: ${msg}`);
-      setOnlineStatusMsg('');
-    });
-
-    socket.on('room_created', (data) => {
-      setOnlineStatusMsg(`部屋 [${data.roomId}] を作成しました。対戦相手を待っています...`);
-      setMyPlayerId(data.playerId);
-    });
-
-    socket.on('room_joined', (data) => {
-      setOnlineStatusMsg(`部屋 [${data.roomId}] に接続しました！`);
-      setMyPlayerId(data.playerId); 
-    });
-
-    socket.on('game_start', (data) => {
-      alert(data.message);
-      setAppState('online_playing'); 
-    });
-
-    // ★新規追加：相手が退出・切断した時のイベント
-    socket.on('opponent_disconnected', () => {
-      alert('相手との通信が切断されました（退出または通信エラー）。タイトルに戻ります。');
-      resetGame();
-      setAppState('menu');
-      setOnlineStatusMsg('');
-      setMyPlayerId(null);
-    });
-
-    return () => {
-      socket.off('error_message');
-      socket.off('room_created');
-      socket.off('room_joined');
-      socket.off('game_start');
-      socket.off('opponent_disconnected'); // ★追加
-    };
-  }, []);
 
   useEffect(() => {
     if (phase === 'minigame_gamble_jump') {
@@ -166,9 +132,7 @@ function App() {
       setJumpIsSpinning(true);
       setJumpResultX(null);
       setJumpResultY(null);
-    } else {
-      setJumpStep('idle');
-    }
+    } else setJumpStep('idle');
   }, [phase]);
 
   useEffect(() => {
@@ -176,16 +140,13 @@ function App() {
     let lastTime = performance.now();
     const animate = (time: number) => {
       if (phase === 'minigame_gamble_jump' && jumpIsSpinningRef.current) {
-        const delta = time - lastTime;
-        lastTime = time;
+        const delta = time - lastTime; lastTime = time;
         jumpAngleRef.current += (jumpSpeed * delta / 1000);
         setJumpRotationAngle(jumpAngleRef.current);
         animFrame = requestAnimationFrame(animate);
       }
     };
-    if (phase === 'minigame_gamble_jump' && jumpIsSpinning) {
-      animFrame = requestAnimationFrame(animate);
-    }
+    if (phase === 'minigame_gamble_jump' && jumpIsSpinning) animFrame = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animFrame);
   }, [phase, jumpIsSpinning, jumpSpeed]);
 
@@ -196,7 +157,6 @@ function App() {
     jumpIsSpinningRef.current = false;
     setJumpRotationAngle(finalAngle);
     setJumpIsSpinning(false);
-
     const normalizedFinal = finalAngle % 360;
     const needleAngleOnDisk = (360 - normalizedFinal) % 360;
     const hitTarget = JUMP_TARGETS.find(t => needleAngleOnDisk >= t.startAngle && needleAngleOnDisk < t.endAngle);
@@ -205,25 +165,17 @@ function App() {
     if (jumpStep === 'spinX') {
       setJumpResultX(value);
       setTimeout(() => {
-        setJumpStep('spinY');
-        setJumpSpeed(Math.floor(Math.random() * 400) + 300); 
-        jumpIsSpinningRef.current = true;
-        setJumpIsSpinning(true);
+        setJumpStep('spinY'); setJumpSpeed(Math.floor(Math.random() * 400) + 300); 
+        jumpIsSpinningRef.current = true; setJumpIsSpinning(true);
       }, 1000);
     } else if (jumpStep === 'spinY') {
       setJumpResultY(value);
-      setTimeout(() => {
-        setJumpStep('result');
-      }, 600);
+      setTimeout(() => setJumpStep('result'), 600);
     }
   };
 
   useEffect(() => {
-    if (phase === 'minigame_bullet' && bulletMinigameData) {
-      setRotationAngle(0);
-      setIsSpinning(true);
-      setBulletResult(null);
-    }
+    if (phase === 'minigame_bullet' && bulletMinigameData) { setRotationAngle(0); setIsSpinning(true); setBulletResult(null); }
   }, [phase, bulletMinigameData]);
 
   useEffect(() => {
@@ -231,15 +183,12 @@ function App() {
     let lastTime = performance.now();
     const animate = (time: number) => {
       if (phase === 'minigame_bullet' && isSpinning && bulletMinigameData) {
-        const delta = time - lastTime;
-        lastTime = time;
+        const delta = time - lastTime; lastTime = time;
         setRotationAngle(prev => (prev + (bulletMinigameData.speed * delta / 1000)) % 360);
         animFrame = requestAnimationFrame(animate);
       }
     };
-    if (phase === 'minigame_bullet' && isSpinning && bulletMinigameData) {
-      animFrame = requestAnimationFrame(animate);
-    }
+    if (phase === 'minigame_bullet' && isSpinning && bulletMinigameData) animFrame = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animFrame);
   }, [phase, isSpinning, bulletMinigameData]);
 
@@ -265,28 +214,56 @@ function App() {
     return () => clearInterval(timerId);
   }, [phase, rendaSettingState?.isActive, rendaSettingState?.timeLeft, rendaPlayState?.isActive, rendaPlayState?.timeLeft]);
 
+  // 通信接続の設定
+  useEffect(() => {
+    socket.connect();
+
+    socket.on('error_message', (msg) => { alert(`エラー: ${msg}`); setOnlineStatusMsg(''); });
+    socket.on('room_created', (data) => {
+      setOnlineStatusMsg(`部屋 [${data.roomId}] を作成しました。対戦相手を待っています...`);
+      setMyPlayerId(data.playerId);
+    });
+    socket.on('room_joined', (data) => {
+      setOnlineStatusMsg(`部屋 [${data.roomId}] に接続しました！`);
+      setMyPlayerId(data.playerId); 
+    });
+    socket.on('waiting_random', () => {
+      setOnlineStatusMsg('野良対戦の相手を探しています...');
+    });
+    socket.on('game_start', (data) => {
+      alert(data.message);
+      setAppState('online_playing'); 
+    });
+    socket.on('opponent_disconnected', () => {
+      alert('相手との通信が切断されました（退出または通信エラー）。タイトルに戻ります。');
+      resetGame(); setAppState('menu'); setOnlineStatusMsg(''); setMyPlayerId(null);
+    });
+
+    return () => {
+      socket.off('error_message'); socket.off('room_created'); socket.off('room_joined'); socket.off('waiting_random'); socket.off('game_start'); socket.off('opponent_disconnected');
+    };
+  }, []);
+
   const handleCreateRoom = () => {
     if (!roomIdInput) return alert('合言葉を入力してください');
-    socket.emit('create_room', roomIdInput);
+    socket.emit('create_room', { roomId: roomIdInput, useTimer: useTimerToggle });
   };
-
   const handleJoinRoom = () => {
     if (!roomIdInput) return alert('合言葉を入力してください');
     socket.emit('join_room', roomIdInput);
   };
+  const handleJoinRandom = (useTimer: boolean) => {
+    socket.emit('join_random', { useTimer });
+  };
 
-// ★変更：タイトルに戻る際、サーバーに退出を通知する
   const handleBackToTitle = () => {
     if (appState === 'online_playing' || appState === 'online_menu') {
       socket.emit('leave_room', roomIdInput);
+      socket.emit('leave_random');
     }
-    resetGame();
-    setAppState('menu');
-    setOnlineStatusMsg('');
-    setMyPlayerId(null);
+    resetGame(); setAppState('menu'); setOnlineStatusMsg(''); setMyPlayerId(null);
   };
 
-  // ★新規追加：投了する処理
   const handleResign = () => {
     if (window.confirm('本当に投了しますか？（負けを認めます）')) {
       dispatch({ type: 'RESIGN', payload: { playerId: myPlayerId } });
@@ -296,46 +273,12 @@ function App() {
   if (appState === 'menu') {
     return (
       <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center font-sans relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 pointer-events-none opacity-20">
-          <div className="absolute w-96 h-96 bg-blue-600 rounded-full blur-[100px] -top-20 -left-20"></div>
-          <div className="absolute w-96 h-96 bg-red-600 rounded-full blur-[100px] top-1/2 right-10"></div>
-        </div>
-
         <div className="z-10 text-center max-w-2xl px-4">
           <h1 className="text-6xl md:text-7xl font-black mb-4 tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-400 to-red-400 drop-shadow-lg">将棋の新弾</h1>
           <p className="text-xl md:text-2xl font-bold text-gray-300 mb-8 tracking-widest">非公式ファンゲーム</p>
-
-          <div className="bg-gray-800 bg-opacity-80 border border-yellow-600/50 p-6 rounded-2xl text-xs md:text-sm text-yellow-100 text-left mb-12 shadow-2xl backdrop-blur-sm leading-relaxed">
-            <p className="font-bold text-yellow-400 mb-2 text-base">⚠️ 二次創作に関するガイドラインへの配慮</p>
-            <p className="mb-2">本ゲームは、オモコロチャンネル様(<a href="https://www.youtube.com/@omocorochannel" className="underline hover:text-white" target="_blank" rel="noreferrer">リンク</a>)の動画企画「将棋の新弾」を元にした、ファンによる非公式の二次創作（開発途中版）です。</p>
-            <p className="mb-2">公式（株式会社バーグハンバーグバーグ様）とは一切関係ありません。完全非営利で運営されており、権利所有者様からの取り下げ要請があった場合は速やかに公開を停止します。</p>
-            <p className="mb-2">"双子"のコマ二種につきましては、@MADOguchimoto様の投稿(<a href="https://x.gd/fzSC4" className="underline hover:text-white" target="_blank" rel="noreferrer">X:旧Twitter</a>)が本家になります。</p>
-            <p className="mb-4">"白の賢人","転移"につきましては、同投稿者様の投稿(<a href="https://x.gd/srSvc" className="underline hover:text-white" target="_blank" rel="noreferrer">リンク</a>)が本家になります。</p>
-            <p className="text-gray-400">上記原作者様達へのリスペクトは前提ですが、コードを弄れる方は、ぜひ自由に改造して遊んだり、より良いものに進化させたりしてください。</p>
-            <p className="text-gray-400">※本ゲームはAI(Gemini)を用いて開発されています。</p>
-            <p className="text-gray-400">mail:zakkuri.synapse@gmail.com</p>
-          </div>
-
-          <div className="flex flex-col gap-6 w-full max-w-md mx-auto">
-            <button 
-              onClick={() => setAppState('local')} 
-              className="group relative w-full py-5 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 rounded-2xl font-bold text-2xl shadow-[0_0_20px_rgba(37,99,235,0.4)] hover:shadow-[0_0_30px_rgba(37,99,235,0.6)] transform transition-all hover:-translate-y-1 overflow-hidden"
-            >
-              <div className="relative z-10 flex flex-col items-center justify-center">
-                <span className="text-3xl mb-1">💻 ローカル対戦</span>
-                <span className="text-sm font-normal text-blue-100">1台のスマホ/PCで交互に操作して遊ぶ</span>
-              </div>
-            </button>
-
-            <button 
-              onClick={() => setAppState('online_menu')} 
-              className="group relative w-full py-5 bg-gradient-to-r from-green-600 to-emerald-500 hover:from-green-500 hover:to-emerald-400 rounded-2xl font-bold text-2xl shadow-[0_0_20px_rgba(16,185,129,0.4)] hover:shadow-[0_0_30px_rgba(16,185,129,0.6)] transform transition-all hover:-translate-y-1 overflow-hidden"
-            >
-              <div className="relative z-10 flex flex-col items-center justify-center">
-                <span className="text-3xl mb-1">🌐 オンライン対戦</span>
-                <span className="text-sm font-normal text-green-100">合言葉を決めて遠隔で対戦する</span>
-              </div>
-            </button>
+          <div className="flex flex-col gap-6 w-full max-w-md mx-auto mt-8">
+            <button onClick={() => setAppState('local')} className="w-full py-5 bg-gradient-to-r from-blue-600 to-blue-500 rounded-2xl font-bold text-2xl shadow-lg">💻 ローカル対戦</button>
+            <button onClick={() => setAppState('online_menu')} className="w-full py-5 bg-gradient-to-r from-green-600 to-emerald-500 rounded-2xl font-bold text-2xl shadow-lg">🌐 オンライン対戦</button>
           </div>
         </div>
       </div>
@@ -344,52 +287,50 @@ function App() {
 
   if (appState === 'online_menu') {
     return (
-    <div className="min-h-screen bg-gray-900 text-white font-sans relative pb-10 overflow-hidden pt-4">
-      {/* ★変更：オンライン対戦中は「タイトルに戻る」を隠し「投了」を出す */}
-      <div className="absolute top-4 left-4 z-20">
-        {appState === 'online_playing' ? (
-          <button 
-          onClick={handleResign} 
-          className="px-4 py-2 bg-red-900 hover:bg-red-800 border border-red-500 rounded-lg text-sm font-bold shadow-lg transition-colors flex items-center gap-2"
-          >
-            🏳️ 投了する
-            </button>
-            ) : (
-            <button 
-            onClick={handleBackToTitle} 
-            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-lg text-sm font-bold shadow-lg transition-colors flex items-center gap-2"
-            >
-              ◀ タイトルへ戻る
-              </button>
-            )}
-            </div>
-          
+      <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center font-sans relative overflow-hidden">
+        <button onClick={handleBackToTitle} className="absolute top-4 left-4 px-4 py-2 bg-gray-800 rounded-lg text-sm font-bold shadow-lg flex items-center gap-2 z-20">◀ タイトルへ戻る</button>
+        
+        <div className="bg-gray-800 p-8 rounded-2xl shadow-2xl border border-green-500 w-full max-w-md text-center z-10 backdrop-blur-sm bg-opacity-95">
+          <h2 className="text-3xl font-bold mb-6 text-green-400 tracking-wide">🌐 オンライン対戦</h2>
           {onlineStatusMsg ? (
             <div className="py-12 flex flex-col items-center justify-center">
-              <div className="text-6xl mb-6 animate-spin select-none">⏳</div>
-              <p className="text-xl font-bold text-yellow-400 animate-pulse bg-gray-900/50 px-4 py-3 rounded-xl border border-yellow-600/30 w-full">{onlineStatusMsg}</p>
-              <button onClick={() => setOnlineStatusMsg('')} className="mt-8 text-sm text-gray-400 underline hover:text-white">キャンセルして入力に戻る</button>
+              <div className="text-6xl mb-6 animate-spin">⏳</div>
+              <p className="text-xl font-bold text-yellow-400 animate-pulse">{onlineStatusMsg}</p>
+              <button onClick={handleBackToTitle} className="mt-8 text-sm text-gray-400 underline">キャンセル</button>
             </div>
           ) : (
             <>
-              <p className="text-gray-300 mb-6 text-sm leading-relaxed">友達と同じ「合言葉」を入力してマッチングします。</p>
-              <input 
-                type="text" 
-                placeholder="合言葉を入力 (例: banana123)" 
-                value={roomIdInput}
-                onChange={(e) => setRoomIdInput(e.target.value)}
-                className="w-full p-4 mb-6 rounded-xl bg-gray-900 border-2 border-gray-700 text-xl font-bold text-center focus:border-green-500 focus:ring-1 focus:ring-green-500 outline-none transition-all placeholder-gray-600 text-green-400 tracking-wider"
-              />
-              <div className="flex gap-4">
-                <button onClick={handleCreateRoom} className="flex-1 py-4 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold text-lg shadow-lg shadow-blue-900/30 transform active:scale-95 transition-all">部屋を作る</button>
-                <button onClick={handleJoinRoom} className="flex-1 py-4 bg-red-600 hover:bg-red-500 rounded-xl font-bold text-lg shadow-lg shadow-red-900/30 transform active:scale-95 transition-all">部屋に入る</button>
+              {/* 合言葉マッチング */}
+              <div className="mb-8">
+                <input type="text" placeholder="合言葉 (例: banana123)" value={roomIdInput} onChange={(e) => setRoomIdInput(e.target.value)} className="w-full p-4 mb-4 rounded-xl bg-gray-900 border-2 border-gray-700 text-xl font-bold text-center text-green-400" />
+                <label className="flex items-center justify-center gap-2 mb-4 text-gray-300 cursor-pointer">
+                  <input type="checkbox" checked={useTimerToggle} onChange={(e) => setUseTimerToggle(e.target.checked)} className="w-5 h-5 accent-green-500" />
+                  時間制限(30秒)ありで部屋を作る
+                </label>
+                <div className="flex gap-4">
+                  <button onClick={handleCreateRoom} className="flex-1 py-4 bg-blue-600 rounded-xl font-bold text-lg">部屋を作る</button>
+                  <button onClick={handleJoinRoom} className="flex-1 py-4 bg-red-600 rounded-xl font-bold text-lg">部屋に入る</button>
+                </div>
+              </div>
+
+              {/* ★野良対戦（ランダムマッチ） */}
+              <div className="pt-8 border-t border-gray-600">
+                <h3 className="text-xl font-bold text-yellow-400 mb-4">世界中の誰かと対戦 (野良)</h3>
+                <div className="flex flex-col gap-3">
+                  <button onClick={() => handleJoinRandom(false)} className="w-full py-4 bg-purple-600 hover:bg-purple-500 rounded-xl font-bold text-lg">時間制限なしで探す</button>
+                  <button onClick={() => handleJoinRandom(true)} className="w-full py-4 border-2 border-purple-500 text-purple-400 hover:bg-purple-900 rounded-xl font-bold text-lg">⏱ 30秒制限ありで探す</button>
+                </div>
               </div>
             </>
           )}
         </div>
+      </div>
     );
   }
 
+  // ============================================================================
+  // 対戦画面
+  // ============================================================================
   let statusText = '';
   if (winner) statusText = 'ゲーム終了！';
   else if (phase === 'placement_p1') statusText = '【配置】Player 1 (青) : 一番手前の列に駒を置いてください';
@@ -409,27 +350,36 @@ function App() {
 
   const myPlayerLabel = appState === 'online_playing' ? (myPlayerId === 'player1' ? '【あなたは Player 1 (青) です】' : '【あなたは Player 2 (赤) です】') : '';
 
+  // ★盤面反転フラグ：オンラインでPlayer 2の時だけ反転させる
+  const isFlipped = appState === 'online_playing' && myPlayerId === 'player2';
+
+  // ★持ち駒UIの上下反転用変数
+  const TopPlayer = isFlipped ? 'player1' : 'player2';
+  const BottomPlayer = isFlipped ? 'player2' : 'player1';
+  const topCap = TopPlayer === 'player1' ? p1Cap : p2Cap;
+  const bottomCap = BottomPlayer === 'player1' ? p1Cap : p2Cap;
+
   return (
     <div className="min-h-screen bg-gray-900 text-white font-sans relative pb-10 overflow-hidden pt-4">
       <div className="absolute top-4 left-4 z-20">
-        <button 
-          onClick={handleBackToTitle} 
-          className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-lg text-sm font-bold shadow-lg transition-colors flex items-center gap-2"
-        >
-          ◀ タイトルへ戻る
-        </button>
+        {appState === 'online_playing' ? (
+          <button onClick={handleResign} className="px-4 py-2 bg-red-900 hover:bg-red-800 border border-red-500 rounded-lg text-sm font-bold shadow-lg flex items-center gap-2">🏳️ 投了する</button>
+        ) : (
+          <button onClick={handleBackToTitle} className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-lg text-sm font-bold shadow-lg flex items-center gap-2">◀ タイトルへ戻る</button>
+        )}
       </div>
 
       <div className="text-center pt-12">
         {myPlayerLabel && <div className={`font-bold mb-2 ${myPlayerId === 'player1' ? 'text-blue-400' : 'text-red-400'}`}>{myPlayerLabel}</div>}
         
         <div className={`inline-block px-6 py-2 rounded-full font-bold shadow-lg mb-2 ${winner ? 'bg-yellow-500' : swapAbilityState ? 'bg-indigo-600' : phase === 'playing' ? (currentPlayer === 'player1' ? 'bg-blue-600' : 'bg-red-600') : 'bg-gray-600'}`}>{statusText}</div>
-        {appState === 'online_playing' && <div className="text-xs text-green-400 font-semibold mb-2">📡 オンライン同期中</div>}
+        {appState === 'online_playing' && <div className="text-xs text-green-400 font-semibold mb-2">📡 オンライン同期中 {ruleSettings?.useTurnTimer && '(タイマーあり)'}</div>}
         
         {placementTimer !== null && (
-          <div className="mb-2 text-xl font-bold text-red-400 animate-pulse bg-gray-800 inline-block px-6 py-2 rounded-lg border border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)]">
-            ⏱ 残り時間: {placementTimer} 秒
-          </div>
+          <div className="mb-2 text-xl font-bold text-red-400 animate-pulse bg-gray-800 inline-block px-6 py-2 rounded-lg border border-red-500">⏱ 残り時間: {placementTimer} 秒</div>
+        )}
+        {turnTimer !== null && (
+          <div className="mb-2 text-xl font-bold text-yellow-400 animate-pulse bg-gray-800 inline-block px-6 py-2 rounded-lg border border-yellow-500">⏱ ターン残り時間: {turnTimer} 秒</div>
         )}
 
         {mustDropState && <div className="text-red-400 font-bold animate-bounce mt-2">⚠️ 迷惑をかけられています！指定の駒を必ず手持ちから出してください！</div>}
@@ -451,34 +401,38 @@ function App() {
       </div>
 
       <div className="max-w-2xl mx-auto px-4 flex flex-col items-center gap-4 mt-4">
-        <div className="w-full bg-red-900 bg-opacity-30 p-4 rounded-lg min-h-[80px] border border-red-900">
-          <p className="text-sm font-bold text-red-300 mb-2">Player 2 の持ち駒</p>
+        {/* 上側の持ち駒（反転ロジックで自動的に相手の持ち駒になる） */}
+        <div className={`w-full bg-opacity-30 p-4 rounded-lg min-h-[80px] border ${TopPlayer === 'player1' ? 'bg-blue-900 border-blue-900' : 'bg-red-900 border-red-900'}`}>
+          <p className={`text-sm font-bold mb-2 ${TopPlayer === 'player1' ? 'text-blue-300' : 'text-red-300'}`}>{TopPlayer === 'player1' ? 'Player 1 の持ち駒' : 'Player 2 の持ち駒'}</p>
           <div className="flex flex-wrap gap-2">
-            {p2Cap.map(piece => (
-              <div key={piece.id} className={`scale-75 origin-top-left -mr-3 -mb-3 cursor-pointer ${selectedPieceId === piece.id ? 'ring-4 ring-yellow-400 rounded-full z-10 relative' : ''} ${isMyPenaltyTurn && mustDropState.pieceId !== piece.id ? 'opacity-30' : ''}`} onClick={() => handleCapturedClick(piece.id)}>
-                <PieceComponent piece={piece} inHand={true} currentPlayer={currentPlayer} />
+            {topCap.map(piece => (
+              <div key={piece.id} className={`scale-75 -mr-3 -mb-3 cursor-pointer ${selectedPieceId === piece.id ? 'ring-4 ring-yellow-400 rounded-full z-10 relative' : ''} ${isMyPenaltyTurn && mustDropState?.pieceId !== piece.id ? 'opacity-30' : ''}`} onClick={() => handleCapturedClick(piece.id)}>
+                <div className={isFlipped ? 'rotate-180' : ''}><PieceComponent piece={piece} inHand={true} currentPlayer={currentPlayer} /></div>
               </div>
             ))}
           </div>
         </div>
 
-        <div className="w-full flex justify-center">
+        {/* 盤面本体（isFlipped が true ならCSSで180度まるごと回転） */}
+        <div className={`w-full flex justify-center transition-transform duration-500 ${isFlipped ? 'rotate-180' : ''}`}>
           <Board pieces={pieces} selectedPieceId={selectedPieceId} selectedCapturedPiece={capturedPieces.find(p => p.id === selectedPieceId)} movablePositions={movablePositions} onCellClick={handleCellClick} currentPlayer={currentPlayer} />
         </div>
 
-        <div className="w-full bg-blue-900 bg-opacity-30 p-4 rounded-lg min-h-[80px] border border-blue-900 mt-4">
-          <p className="text-sm font-bold text-blue-300 mb-2">Player 1 の持ち駒</p>
+        {/* 下側の持ち駒（自分の持ち駒になる） */}
+        <div className={`w-full bg-opacity-30 p-4 rounded-lg min-h-[80px] border ${BottomPlayer === 'player1' ? 'bg-blue-900 border-blue-900' : 'bg-red-900 border-red-900'}`}>
+          <p className={`text-sm font-bold mb-2 ${BottomPlayer === 'player1' ? 'text-blue-300' : 'text-red-300'}`}>{BottomPlayer === 'player1' ? 'Player 1 の持ち駒' : 'Player 2 の持ち駒'}</p>
           <div className="flex flex-wrap gap-2">
-            {p1Cap.map(piece => (
-              <div key={piece.id} className={`scale-75 origin-top-left -mr-3 -mb-3 cursor-pointer ${selectedPieceId === piece.id ? 'ring-4 ring-yellow-400 rounded-full z-10 relative' : ''} ${isMyPenaltyTurn && mustDropState.pieceId !== piece.id ? 'opacity-30' : ''}`} onClick={() => handleCapturedClick(piece.id)}>
-                <PieceComponent piece={piece} inHand={true} currentPlayer={currentPlayer} />
+            {bottomCap.map(piece => (
+              <div key={piece.id} className={`scale-75 -mr-3 -mb-3 cursor-pointer ${selectedPieceId === piece.id ? 'ring-4 ring-yellow-400 rounded-full z-10 relative' : ''} ${isMyPenaltyTurn && mustDropState?.pieceId !== piece.id ? 'opacity-30' : ''}`} onClick={() => handleCapturedClick(piece.id)}>
+                <div className={isFlipped ? 'rotate-180' : ''}><PieceComponent piece={piece} inHand={true} currentPlayer={currentPlayer} /></div>
               </div>
             ))}
           </div>
         </div>
       </div>
 
-      {/* --- 転移ルーレット画面 --- */}
+      {/* (以下、既存の転移ルーレット・白の賢人などのダイアログは全てそのまま維持) */}
+      {/* 転移ルーレット画面 */}
       {phase === 'minigame_gamble_jump' && (
         <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
           <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-2 border-green-500 max-w-md w-full">
@@ -810,28 +764,24 @@ function App() {
           </div>
         </div>
       )}
-      {/* ★変更：勝敗画面の表示を YOU WIN / YOU LOSE に切り替え */}
       {winner && (
         <div className="absolute inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50">
           <div className="bg-gray-800 p-8 rounded-xl text-center shadow-[0_0_50px_rgba(0,0,0,1)] border-2 border-gray-600">
             {appState === 'online_playing' ? (
-              // オンライン時の主観的表示
               <h2 className={`text-6xl mb-6 font-black tracking-widest drop-shadow-lg ${winner.winner === myPlayerId ? 'text-yellow-400' : 'text-blue-500'}`}>
                 {winner.winner === myPlayerId ? '🎊 YOU WIN! 🎊' : '💀 YOU LOSE... 💀'}
-                </h2>
-                ) : (
-                  // ローカル時の客観的表示
-                  <h2 className="text-6xl text-yellow-400 mb-6 font-black tracking-widest drop-shadow-lg">
-                    {winner.winner === 'player1' ? 'BLUE WIN!' : 'RED WIN!'}
-                    </h2>
-                  )}
-                  
-                  <p className="mb-8 text-xl font-bold text-gray-300 bg-gray-900 inline-block px-6 py-3 rounded-lg border border-gray-700">{winner.reason}</p>
-                  
-                  <div className="flex flex-col gap-4 max-w-sm mx-auto">
-                    {/* 「もう一度遊ぶ」を押すと、SYSTEM_RESET_GAME がサーバーに飛び、相手も強制リスタートになる（リマッチ機能として機能します） */}
-                    <button onClick={resetGame} className="w-full py-4 bg-green-600 hover:bg-green-500 rounded-xl text-xl font-bold shadow-lg transform active:scale-95 transition-all">もう一度遊ぶ</button>
-                    <button onClick={handleBackToTitle} className="w-full py-4 bg-gray-700 hover:bg-gray-600 rounded-xl text-xl font-bold shadow-lg transform active:scale-95 transition-all">タイトルへ戻る（退出）</button>
+              </h2>
+            ) : (
+              <h2 className="text-6xl text-yellow-400 mb-6 font-black tracking-widest drop-shadow-lg">
+                {winner.winner === 'player1' ? 'BLUE WIN!' : 'RED WIN!'}
+              </h2>
+            )}
+            
+            <p className="mb-8 text-xl font-bold text-gray-300 bg-gray-900 inline-block px-6 py-3 rounded-lg border border-gray-700">{winner.reason}</p>
+            
+            <div className="flex flex-col gap-4 max-w-sm mx-auto">
+              <button onClick={resetGame} className="w-full py-4 bg-green-600 hover:bg-green-500 rounded-xl text-xl font-bold shadow-lg transform active:scale-95 transition-all">もう一度遊ぶ</button>
+              <button onClick={handleBackToTitle} className="w-full py-4 bg-gray-700 hover:bg-gray-600 rounded-xl text-xl font-bold shadow-lg transform active:scale-95 transition-all">タイトルへ戻る（退出）</button>
             </div>
           </div>
         </div>
