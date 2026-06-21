@@ -9,7 +9,10 @@ import { socket } from './network/socket';
 import { getOccupiedPositions } from './rules/movement'; 
 
 const JUMP_TARGETS = Array.from({length: 20}, (_, i) => ({ 
-  value: (i % 5) + 1, color: ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7'][i % 5], startAngle: i * 18, endAngle: (i + 1) * 18 
+  value: (i % 5) + 1, 
+  color: ['#ef4444', '#3b82f6', '#22c55e', '#eab308', '#a855f7'][i % 5], 
+  startAngle: i * 18, 
+  endAngle: (i + 1) * 18 
 }));
 
 const WaitingForOpponent = ({ title, actionName }: { title: string, actionName: string }) => (
@@ -23,12 +26,12 @@ const WaitingForOpponent = ({ title, actionName }: { title: string, actionName: 
 function App() {
   const [appState, setAppState] = useState<'menu' | 'local' | 'online_menu' | 'online_playing'>('menu');
   const [roomIdInput, setRoomIdInput] = useState('');
-  const [useTimerToggle, setUseTimerToggle] = useState(false); // ★タイマーON/OFF用
+  const [useTimerToggle, setUseTimerToggle] = useState(false);
   const [onlineStatusMsg, setOnlineStatusMsg] = useState(''); 
   const [myPlayerId, setMyPlayerId] = useState<'player1' | 'player2' | null>(null);
 
   const [placementTimer, setPlacementTimer] = useState<number | null>(null);
-  const [turnTimer, setTurnTimer] = useState<number | null>(null); // ★30秒タイマー用
+  const [turnTimer, setTurnTimer] = useState<number | null>(null); 
 
   const { 
     phase, pieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, movablePositions, pendingPromotion, winner, resetGame,
@@ -44,7 +47,6 @@ function App() {
   const nextPieceId = activeQueue[0];
   const nextPieceName = nextPieceId ? PIECE_DEFINITIONS[nextPieceId]?.name : '';
 
-  // 1. 配置フェーズのタイマー管理
   useEffect(() => {
     const isPlacement = phase.startsWith('placement') || phase.startsWith('trap_placement');
     if (appState === 'online_playing' && isPlacement && isMyTurn && activeQueue.length > 0 && !winner) {
@@ -54,7 +56,6 @@ function App() {
     }
   }, [phase, currentPlayer, myPlayerId, appState, activeQueue.length, winner]);
 
-  // 2. プレイングフェーズ（30秒）のタイマー管理
   useEffect(() => {
     const isPlacement = phase.startsWith('placement') || phase.startsWith('trap_placement');
     if (appState === 'online_playing' && ruleSettings?.useTurnTimer && !isPlacement && isMyTurn && phase === 'playing' && !winner) {
@@ -64,13 +65,11 @@ function App() {
     }
   }, [phase, currentPlayer, myPlayerId, appState, ruleSettings?.useTurnTimer, turnCount, winner]);
 
-  // 3. タイマーのカウントダウン実行
   useEffect(() => {
     if (placementTimer !== null && placementTimer > 0) {
       const tid = setTimeout(() => setPlacementTimer(placementTimer - 1), 1000);
       return () => clearTimeout(tid);
     } else if (placementTimer === 0) {
-      // 配置時間切れ：ランダム配置
       const isTrapPhase = phase.startsWith('trap');
       const defId = activeQueue[0];
       let validPositions: {x: number, y: number}[] = [];
@@ -102,13 +101,11 @@ function App() {
       const tid = setTimeout(() => setTurnTimer(turnTimer - 1), 1000);
       return () => clearTimeout(tid);
     } else if (turnTimer === 0) {
-      // ★30秒時間切れ：強制ターンスキップ
       dispatch({ type: 'SKIP_TURN', payload: { playerId: myPlayerId } });
       setTurnTimer(null);
     }
   }, [turnTimer]);
 
-  // (ルーレット系のuseEffect群は省略せずにそのまま維持)
   const [rotationAngle, setRotationAngle] = useState(0);
   const [isSpinning, setIsSpinning] = useState(false);
   const [bulletResult, setBulletResult] = useState<{ targetId: string | null, label: string } | null>(null);
@@ -214,7 +211,6 @@ function App() {
     return () => clearInterval(timerId);
   }, [phase, rendaSettingState?.isActive, rendaSettingState?.timeLeft, rendaPlayState?.isActive, rendaPlayState?.timeLeft]);
 
-  // 通信接続の設定
   useEffect(() => {
     socket.connect();
 
@@ -313,7 +309,7 @@ function App() {
                 </div>
               </div>
 
-              {/* ★野良対戦（ランダムマッチ） */}
+              {/* 野良対戦（ランダムマッチ） */}
               <div className="pt-8 border-t border-gray-600">
                 <h3 className="text-xl font-bold text-yellow-400 mb-4">世界中の誰かと対戦 (野良)</h3>
                 <div className="flex flex-col gap-3">
@@ -350,10 +346,29 @@ function App() {
 
   const myPlayerLabel = appState === 'online_playing' ? (myPlayerId === 'player1' ? '【あなたは Player 1 (青) です】' : '【あなたは Player 2 (赤) です】') : '';
 
-  // ★盤面反転フラグ：オンラインでPlayer 2の時だけ反転させる
+  // ============================================================================
+  // ★最強の視認性改善：データレイヤーでの座標反転
+  // ============================================================================
   const isFlipped = appState === 'online_playing' && myPlayerId === 'player2';
 
-  // ★持ち駒UIの上下反転用変数
+  const displayPieces = pieces.map(p => {
+    if (!isFlipped) return p;
+    return { ...p, position: { x: 4 - p.position.x, y: 4 - p.position.y } };
+  });
+
+  const displayMovablePositions = movablePositions.map(pos => {
+    if (!isFlipped) return pos;
+    return { x: 4 - pos.x, y: 4 - pos.y };
+  });
+
+  const handleBoardClick = (x: number, y: number) => {
+    if (isFlipped) {
+      handleCellClick(4 - x, 4 - y);
+    } else {
+      handleCellClick(x, y);
+    }
+  };
+
   const TopPlayer = isFlipped ? 'player1' : 'player2';
   const BottomPlayer = isFlipped ? 'player2' : 'player1';
   const topCap = TopPlayer === 'player1' ? p1Cap : p2Cap;
@@ -384,6 +399,7 @@ function App() {
 
         {mustDropState && <div className="text-red-400 font-bold animate-bounce mt-2">⚠️ 迷惑をかけられています！指定の駒を必ず手持ちから出してください！</div>}
         {turnSkipState[currentPlayer === 'player1' ? 'player2' : 'player1'] && <div className="text-yellow-400 font-bold mb-2 animate-pulse">※相手はペナルティで1回休みです！</div>}
+        
         {phase.startsWith('placement') || phase.startsWith('trap_placement') ? (
           nextPieceId && (
             <div className="block mt-2">
@@ -395,44 +411,44 @@ function App() {
             </div>
           )
         ) : null}
+        
         {canSpinRoulette && phase === 'playing' && !turnState.isSecondMove && isMyTurn && (
           <div className="mt-4"><button onClick={startRoulette} className="px-6 py-3 bg-purple-600 hover:bg-purple-500 rounded-full font-bold shadow-lg animate-bounce border-2 border-purple-300">🎲 運命のルーレットを回す</button></div>
         )}
       </div>
 
       <div className="max-w-2xl mx-auto px-4 flex flex-col items-center gap-4 mt-4">
-        {/* 上側の持ち駒（反転ロジックで自動的に相手の持ち駒になる） */}
+        {/* 上側の持ち駒（常に相手の持ち駒になる） */}
         <div className={`w-full bg-opacity-30 p-4 rounded-lg min-h-[80px] border ${TopPlayer === 'player1' ? 'bg-blue-900 border-blue-900' : 'bg-red-900 border-red-900'}`}>
           <p className={`text-sm font-bold mb-2 ${TopPlayer === 'player1' ? 'text-blue-300' : 'text-red-300'}`}>{TopPlayer === 'player1' ? 'Player 1 の持ち駒' : 'Player 2 の持ち駒'}</p>
           <div className="flex flex-wrap gap-2">
             {topCap.map(piece => (
               <div key={piece.id} className={`scale-75 -mr-3 -mb-3 cursor-pointer ${selectedPieceId === piece.id ? 'ring-4 ring-yellow-400 rounded-full z-10 relative' : ''} ${isMyPenaltyTurn && mustDropState?.pieceId !== piece.id ? 'opacity-30' : ''}`} onClick={() => handleCapturedClick(piece.id)}>
-                <div className={isFlipped ? 'rotate-180' : ''}><PieceComponent piece={piece} inHand={true} currentPlayer={currentPlayer} /></div>
+                <div className="rotate-180"><PieceComponent piece={piece} inHand={true} currentPlayer={currentPlayer} /></div>
               </div>
             ))}
           </div>
         </div>
 
-        {/* 盤面本体（isFlipped が true ならCSSで180度まるごと回転） */}
-        <div className={`w-full flex justify-center transition-transform duration-500 ${isFlipped ? 'rotate-180' : ''}`}>
-          <Board pieces={pieces} selectedPieceId={selectedPieceId} selectedCapturedPiece={capturedPieces.find(p => p.id === selectedPieceId)} movablePositions={movablePositions} onCellClick={handleCellClick} currentPlayer={currentPlayer} />
+        {/* 盤面本体（CSSのrotate-180を廃止し、データ反転で対応） */}
+        <div className="w-full flex justify-center transition-opacity duration-500">
+          <Board pieces={displayPieces} selectedPieceId={selectedPieceId} selectedCapturedPiece={capturedPieces.find(p => p.id === selectedPieceId)} movablePositions={displayMovablePositions} onCellClick={handleBoardClick} currentPlayer={currentPlayer} />
         </div>
 
-        {/* 下側の持ち駒（自分の持ち駒になる） */}
+        {/* 下側の持ち駒（常に自分の持ち駒になる） */}
         <div className={`w-full bg-opacity-30 p-4 rounded-lg min-h-[80px] border ${BottomPlayer === 'player1' ? 'bg-blue-900 border-blue-900' : 'bg-red-900 border-red-900'}`}>
           <p className={`text-sm font-bold mb-2 ${BottomPlayer === 'player1' ? 'text-blue-300' : 'text-red-300'}`}>{BottomPlayer === 'player1' ? 'Player 1 の持ち駒' : 'Player 2 の持ち駒'}</p>
           <div className="flex flex-wrap gap-2">
             {bottomCap.map(piece => (
               <div key={piece.id} className={`scale-75 -mr-3 -mb-3 cursor-pointer ${selectedPieceId === piece.id ? 'ring-4 ring-yellow-400 rounded-full z-10 relative' : ''} ${isMyPenaltyTurn && mustDropState?.pieceId !== piece.id ? 'opacity-30' : ''}`} onClick={() => handleCapturedClick(piece.id)}>
-                <div className={isFlipped ? 'rotate-180' : ''}><PieceComponent piece={piece} inHand={true} currentPlayer={currentPlayer} /></div>
+                <div><PieceComponent piece={piece} inHand={true} currentPlayer={currentPlayer} /></div>
               </div>
             ))}
           </div>
         </div>
       </div>
 
-      {/* (以下、既存の転移ルーレット・白の賢人などのダイアログは全てそのまま維持) */}
-      {/* 転移ルーレット画面 */}
+      {/* --- 転移ルーレット画面 --- */}
       {phase === 'minigame_gamble_jump' && (
         <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
           <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-2 border-green-500 max-w-md w-full">
@@ -486,7 +502,7 @@ function App() {
                     </button>
                   ) : jumpStep === 'result' ? (
                     <button 
-                      onClick={() => resolveGambleJump((jumpResultX || 1) - 1, (jumpResultY || 1) - 1)} 
+                      onClick={() => resolveGambleJump(isFlipped ? 4 - (jumpResultX! - 1) : (jumpResultX! - 1), isFlipped ? 4 - (jumpResultY! - 1) : (jumpResultY! - 1))} 
                       className="px-8 py-3 bg-blue-600 hover:bg-blue-500 rounded font-bold text-xl w-full animate-pulse"
                     >
                       転移する！
