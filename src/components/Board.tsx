@@ -13,7 +13,7 @@ interface Props {
   onCellClick: (x: number, y: number) => void;
   currentPlayer: PlayerId;
   isFlipped: boolean; 
-  explosions?: Position[]; // ★追加
+  explosions?: Position[];
 }
 
 export const Board: React.FC<Props> = ({ pieces, selectedPieceId, selectedCapturedPiece, movablePositions, onCellClick, currentPlayer, isFlipped, explosions = [] }) => {
@@ -38,7 +38,6 @@ export const Board: React.FC<Props> = ({ pieces, selectedPieceId, selectedCaptur
             isMovable = movablePositions.some(mPos => getOccupiedPositions({ ...activePiece, position: mPos }).some(pos => pos.x === cell.x && pos.y === cell.y));
           }
 
-          // ★追加：このマスで爆発が起きているか判定
           const isExploding = explosions.some(e => e.x === cell.x && e.y === cell.y);
 
           let bgClass = 'bg-gray-300 hover:bg-gray-400';
@@ -49,13 +48,12 @@ export const Board: React.FC<Props> = ({ pieces, selectedPieceId, selectedCaptur
 
           return (
             <div key={`${cell.x}-${cell.y}`} className={`relative w-16 h-16 flex items-center justify-center rounded transition-all duration-200 ${bgClass} ${zIndexClass}`} onClick={() => onCellClick(cell.x, cell.y)}>
+              {/* ★修正：不要な absolute や translate-x のラッパーを削除し、直接 Piece を呼び出す */}
               {pieceOnCellAnchor && isVisible ? (
-                <div className={`absolute top-0 left-0 ${PIECE_DEFINITIONS[pieceOnCellAnchor.definitionId]?.size?.width === 2 ? '-translate-x-[68px]' : ''}`}>
-                  <Piece piece={pieceOnCellAnchor} inHand={false} currentPlayer={currentPlayer} isFlipped={isFlipped} />
-                </div>
+                <Piece piece={pieceOnCellAnchor} inHand={false} currentPlayer={currentPlayer} isFlipped={isFlipped} />
               ) : null}
 
-              {/* ★新規追加：爆発エフェクトの描画 */}
+              {/* 爆発エフェクトの描画 */}
               {isExploding && (
                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-[100]">
                    <div className="absolute w-24 h-24 bg-red-500 rounded-full mix-blend-screen animate-ping opacity-75"></div>

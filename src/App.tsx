@@ -37,7 +37,7 @@ function App() {
   const { 
     phase, pieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, movablePositions, pendingPromotion, winner, resetGame,
     chohanState, rouletteState, turnState, turnSkipState, wolfDeclaration, accuseState, turnCount, mustDropState, pendingBombActivation, bulletMinigameData,
-    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState, ruleSettings, explosions, dispatch, clearExplosions, // ★追加
+    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState, ruleSettings, explosions, dispatch, clearExplosions,
     handleCellClick, handleCapturedClick, resolvePromotion, resolveWolfDeclaration, proceedAccusation, cancelAccusation, resolveAccusation, closeAccusationResult, 
     playChohan, resolveChohan, startRoulette, resolveRoulette, resolveBombActivation, resolveBullet,
     startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation, resolveSwapAbility, resolveGambleJump, cancelGambleJump
@@ -48,9 +48,6 @@ function App() {
   const nextPieceId = activeQueue[0];
   const nextPieceName = nextPieceId ? PIECE_DEFINITIONS[nextPieceId]?.name : '';
 
-  // ============================================================================
-  // ★新規追加：ローカル対戦時の「端末受け渡し」画面の制御
-  // ============================================================================
   const [showPassDevice, setShowPassDevice] = useState(false);
   const prevAppState = useRef(appState);
   const prevPlayer = useRef(currentPlayer);
@@ -59,11 +56,11 @@ function App() {
   useEffect(() => {
     if (appState === 'local' && !winner) {
       if (prevAppState.current !== 'local') {
-        setShowPassDevice(true); // ゲーム開始時
+        setShowPassDevice(true); 
       } else if (prevPlayer.current !== currentPlayer) {
-        setShowPassDevice(true); // ターン交代時
+        setShowPassDevice(true); 
       } else if (prevPhase.current === 'finished' && phase === 'placement_p1') {
-        setShowPassDevice(true); // リセット時
+        setShowPassDevice(true); 
       }
     }
     prevAppState.current = appState;
@@ -71,7 +68,6 @@ function App() {
     prevPhase.current = phase;
   }, [appState, currentPlayer, phase, winner]);
 
-  // ★新規追加：爆発アニメーションを1.2秒で消す
   useEffect(() => {
     if (explosions && explosions.length > 0) {
       const timer = setTimeout(() => {
@@ -389,7 +385,6 @@ function App() {
     return { x: 4 - pos.x, y: 4 - pos.y };
   });
 
-  // ★追加：爆発の座標も反転させる
   const displayExplosions = (explosions || []).map(pos => {
     if (!isFlipped) return pos;
     return { x: 4 - pos.x, y: 4 - pos.y };
@@ -410,10 +405,6 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white font-sans relative pb-10 overflow-hidden pt-4">
-      
-      {/* ============================================================================ */}
-      {/* ★新規追加：ローカル対戦時の端末受け渡し画面オーバーレイ */}
-      {/* ============================================================================ */}
       {appState === 'local' && showPassDevice && !winner && (
         <div className="absolute inset-0 bg-gray-900 z-[100] flex flex-col items-center justify-center">
           <div className="text-8xl mb-8 animate-bounce">{currentPlayer === 'player1' ? '🟦' : '🟥'}</div>
@@ -478,12 +469,13 @@ function App() {
       </div>
 
       <div className="max-w-2xl mx-auto px-4 flex flex-col items-center gap-4 mt-4">
+        {/* 上側の持ち駒（★修正：相手の駒の文字が逆さまになる問題解消） */}
         <div className={`w-full bg-opacity-30 p-4 rounded-lg min-h-[80px] border ${TopPlayer === 'player1' ? 'bg-blue-900 border-blue-900' : 'bg-red-900 border-red-900'}`}>
           <p className={`text-sm font-bold mb-2 ${TopPlayer === 'player1' ? 'text-blue-300' : 'text-red-300'}`}>{TopPlayer === 'player1' ? 'Player 1 の持ち駒' : 'Player 2 の持ち駒'}</p>
           <div className="flex flex-wrap gap-2">
             {topCap.map(piece => (
               <div key={piece.id} className={`scale-75 -mr-3 -mb-3 cursor-pointer ${selectedPieceId === piece.id ? 'ring-4 ring-yellow-400 rounded-full z-10 relative' : ''} ${isMyPenaltyTurn && mustDropState?.pieceId !== piece.id ? 'opacity-30' : ''}`} onClick={() => handleCapturedClick(piece.id)}>
-                <div><PieceComponent piece={piece} inHand={true} currentPlayer={currentPlayer} /></div>
+                <div><PieceComponent piece={piece} inHand={true} currentPlayer={currentPlayer} isFlipped={false} /></div>
               </div>
             ))}
           </div>
@@ -494,18 +486,20 @@ function App() {
           <Board pieces={displayPieces} selectedPieceId={selectedPieceId} selectedCapturedPiece={capturedPieces.find(p => p.id === selectedPieceId)} movablePositions={displayMovablePositions} onCellClick={handleBoardClick} currentPlayer={currentPlayer} isFlipped={isFlipped} explosions={displayExplosions} />
         </div>
 
+        {/* 下側の持ち駒 */}
         <div className={`w-full bg-opacity-30 p-4 rounded-lg min-h-[80px] border ${BottomPlayer === 'player1' ? 'bg-blue-900 border-blue-900' : 'bg-red-900 border-red-900'}`}>
           <p className={`text-sm font-bold mb-2 ${BottomPlayer === 'player1' ? 'text-blue-300' : 'text-red-300'}`}>{BottomPlayer === 'player1' ? 'Player 1 の持ち駒' : 'Player 2 の持ち駒'}</p>
           <div className="flex flex-wrap gap-2">
             {bottomCap.map(piece => (
               <div key={piece.id} className={`scale-75 -mr-3 -mb-3 cursor-pointer ${selectedPieceId === piece.id ? 'ring-4 ring-yellow-400 rounded-full z-10 relative' : ''} ${isMyPenaltyTurn && mustDropState?.pieceId !== piece.id ? 'opacity-30' : ''}`} onClick={() => handleCapturedClick(piece.id)}>
-                <div><PieceComponent piece={piece} inHand={true} currentPlayer={currentPlayer} /></div>
+                <div><PieceComponent piece={piece} inHand={true} currentPlayer={currentPlayer} isFlipped={false} /></div>
               </div>
             ))}
           </div>
         </div>
       </div>
 
+      {/* --- 各種イベントUI --- */}
       {phase === 'minigame_gamble_jump' && (
         <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
           <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-2 border-green-500 max-w-md w-full">
