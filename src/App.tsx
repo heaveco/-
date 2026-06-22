@@ -298,15 +298,54 @@ function App() {
     }
   };
 
-  if (appState === 'menu') {
+if (appState === 'menu') {
     return (
       <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center font-sans relative overflow-hidden">
+        
+        {/* 背景の装飾（これも消えていたので復活させています） */}
+        <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 pointer-events-none opacity-20">
+          <div className="absolute w-96 h-96 bg-blue-600 rounded-full blur-[100px] -top-20 -left-20"></div>
+          <div className="absolute w-96 h-96 bg-red-600 rounded-full blur-[100px] top-1/2 right-10"></div>
+        </div>
+
         <div className="z-10 text-center max-w-2xl px-4">
           <h1 className="text-6xl md:text-7xl font-black mb-4 tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-400 to-red-400 drop-shadow-lg">将棋の新弾</h1>
           <p className="text-xl md:text-2xl font-bold text-gray-300 mb-8 tracking-widest">非公式ファンゲーム</p>
+          
+          {/* ========================================== */}
+          {/* ★復活：二次創作に関するガイドラインへの配慮 */}
+          {/* ========================================== */}
+          <div className="bg-gray-800 bg-opacity-80 border border-yellow-600/50 p-6 rounded-2xl text-xs md:text-sm text-yellow-100 text-left mb-12 shadow-2xl backdrop-blur-sm leading-relaxed">
+            <p className="font-bold text-yellow-400 mb-2 text-base">⚠️ 二次創作に関するガイドラインへの配慮</p>
+            <p className="mb-2">本ゲームは、オモコロチャンネル様(<a href="https://www.youtube.com/@omocorochannel" className="underline hover:text-white" target="_blank" rel="noreferrer">リンク</a>)の動画企画「将棋の新弾」を元にした、ファンによる非公式の二次創作（開発途中版）です。</p>
+            <p className="mb-2">公式（株式会社バーグハンバーグバーグ様）とは一切関係ありません。完全非営利で運営されており、権利所有者様からの取り下げ要請があった場合は速やかに公開を停止します。</p>
+            <p className="mb-2">"双子"のコマ二種につきましては、@MADOguchimoto様の投稿(<a href="https://x.gd/fzSC4" className="underline hover:text-white" target="_blank" rel="noreferrer">X:旧Twitter</a>)が本家になります。</p>
+            <p className="mb-4">"白の賢人","転移"につきましては、同投稿者様の投稿(<a href="https://x.gd/srSvc" className="underline hover:text-white" target="_blank" rel="noreferrer">リンク</a>)が本家になります。</p>
+            <p className="text-gray-400">上記原作者様達へのリスペクトは前提ですが、コードを弄れる方は、ぜひ自由に改造して遊んだり、より良いものに進化させたりしてください。</p>
+            <p className="text-gray-400">※本ゲームはAI(Gemini)を用いて開発されています。</p>
+            <p className="text-gray-400">mail:zakkuri.synapse@gmail.com</p>
+          </div>
+          {/* ========================================== */}
+
           <div className="flex flex-col gap-6 w-full max-w-md mx-auto mt-8">
-            <button onClick={() => setAppState('local')} className="w-full py-5 bg-gradient-to-r from-blue-600 to-blue-500 rounded-2xl font-bold text-2xl shadow-lg">💻 ローカル対戦</button>
-            <button onClick={() => setAppState('online_menu')} className="w-full py-5 bg-gradient-to-r from-green-600 to-emerald-500 rounded-2xl font-bold text-2xl shadow-lg">🌐 オンライン対戦</button>
+            <button 
+              onClick={() => setAppState('local')} 
+              className="group relative w-full py-5 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 rounded-2xl font-bold text-2xl shadow-[0_0_20px_rgba(37,99,235,0.4)] hover:shadow-[0_0_30px_rgba(37,99,235,0.6)] transform transition-all hover:-translate-y-1 overflow-hidden"
+            >
+              <div className="relative z-10 flex flex-col items-center justify-center">
+                <span className="text-3xl mb-1">💻 ローカル対戦</span>
+                <span className="text-sm font-normal text-blue-100">1台のスマホ/PCで交互に操作して遊ぶ</span>
+              </div>
+            </button>
+            <button 
+              onClick={() => setAppState('online_menu')} 
+              className="group relative w-full py-5 bg-gradient-to-r from-green-600 to-emerald-500 hover:from-green-500 hover:to-emerald-400 rounded-2xl font-bold text-2xl shadow-[0_0_20px_rgba(16,185,129,0.4)] hover:shadow-[0_0_30px_rgba(16,185,129,0.6)] transform transition-all hover:-translate-y-1 overflow-hidden"
+            >
+              <div className="relative z-10 flex flex-col items-center justify-center">
+                <span className="text-3xl mb-1">🌐 オンライン対戦</span>
+                <span className="text-sm font-normal text-green-100">合言葉を決めて遠隔で対戦する</span>
+              </div>
+            </button>
           </div>
         </div>
       </div>
