@@ -102,11 +102,33 @@ export const calculateMovablePositions = (piece: Piece, board: Piece[], turnCoun
         movablePositions.push({ x: piece.position.x + offset.dx, y: piece.position.y + (offset.dy * dir) });
       }
     } else if (rule.generator === 'edge_warp') {
-      if (piece.position.x === 0) movablePositions.push({ x: 4, y: piece.position.y });
-      if (piece.position.x === 4) movablePositions.push({ x: 0, y: piece.position.y });
-      if (piece.position.y === 0) movablePositions.push({ x: piece.position.x, y: 4 });
-      if (piece.position.y === 4) movablePositions.push({ x: piece.position.x, y: 0 });
-    } else if (rule.generator === 'straight') {
+      const currentX = piece.position.x;
+      const currentY = piece.position.y;
+
+      // 1. 左端 (X=0) にいて、さらに左・左上へ行こうとした時のワープ
+      if (currentX === 0) {
+        movablePositions.push({ x: 4, y: currentY });          // 真左へのワープ
+        movablePositions.push({ x: 4, y: (currentY - 1 + 5) % 5 }); // 左上へのワープ
+      }
+      
+      // 2. 右端 (X=4) にいて、さらに右・右上へ行こうとした時のワープ
+      if (currentX === 4) {
+        movablePositions.push({ x: 0, y: currentY });          // 真右へのワープ
+        movablePositions.push({ x: 0, y: (currentY - 1 + 5) % 5 }); // 右上へのワープ
+      }
+      
+      // 3. 上端 (Y=0) にいて、さらに上・左上・右上へ行こうとした時のワープ
+      if (currentY === 0) {
+        movablePositions.push({ x: currentX, y: 4 });          // 真上へのワープ
+        movablePositions.push({ x: (currentX - 1 + 5) % 5, y: 4 }); // 左上へのワープ
+        movablePositions.push({ x: (currentX + 1 + 5) % 5, y: 4 }); // 右上へのワープ
+      }
+      
+      // 4. 下端 (Y=4) にいて、さらに下へ行こうとした時のワープ
+      if (currentY === 4) {
+        movablePositions.push({ x: currentX, y: 0 });          // 真下へのワープ
+      }
+      }else if (rule.generator === 'straight') {
       for (const offset of rule.params) {
         let curX = piece.position.x;
         let curY = piece.position.y;
