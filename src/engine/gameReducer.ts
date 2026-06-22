@@ -163,6 +163,7 @@ const executeMove = (state: GameState, payload: { pieceId: string, to: Position,
 
   const activeDef = getEffectiveDefinition(activePiece);
   const isPusher = activeDef?.tags?.includes('pusher');
+  const isGhostDetachment = !isDrop && activePiece.components?.ghostAttached === nextState.currentPlayer;
 
   if (!destroyedAllyMineIds) {
     let allyMines: string[] = [];
@@ -218,15 +219,31 @@ const executeMove = (state: GameState, payload: { pieceId: string, to: Position,
   }
 
   if (hitMineId) {
-    nextState.explosions = [...(nextState.explosions || []), finalTo]; // ★地雷を踏んだエフェクト
+    nextState.explosions = [...(nextState.explosions || []), finalTo];
 
     if (isDrop) {
+      // (既存のisDrop処理そのまま)
       nextCaptured = nextCaptured.filter(p => p.id !== pieceId);
       nextPieces = nextPieces.filter(p => p.id !== hitMineId);
       if (activePiece.definitionId === 'king') nextState.winner = { winner: activePiece.owner === 'player1' ? 'player2' : 'player1', reason: '王が地雷の上に置かれて爆死しました！' };
       if (nextState.mustDropState?.pieceId === pieceId) nextState.mustDropState = null;
       lastActionData = { type: 'drop', definitionId: activePiece.definitionId, x: finalTo.x };
+    } else if (isGhostDetachment) {
+      // ★追加：霊が地雷に乗り移ろうとした場合は霊が消滅し、元のホストは生き残る
+      nextPieces = nextPieces.filter(p => p.id !== hitMineId);
+      nextPieces = nextPieces.map(p => {
+        if (p.id === activePiece.id) {
+          const newComps = { ...p.components };
+          delete newComps.ghostAttached;
+          const origOwner = newComps.originalOwner || (p.owner === 'player1' ? 'player2' : 'player1');
+          delete newComps.originalOwner;
+          return { ...p, owner: origOwner, components: newComps }; // ★元の所有者に戻す
+        }
+        return p;
+      });
+      lastActionData = { type: 'move' };
     } else {
+      // (既存の通常処理そのまま)
       nextPieces = nextPieces.filter(p => p.id !== activePiece.id && p.id !== hitMineId);
       if (activePiece.definitionId === 'king') nextState.winner = { winner: activePiece.owner === 'player1' ? 'player2' : 'player1', reason: '王が地雷を踏んで爆死しました！' };
       lastActionData = { type: 'move' };
@@ -266,6 +283,47 @@ const executeMove = (state: GameState, payload: { pieceId: string, to: Position,
       lastActionData = { type: 'drop', definitionId: newPiece.definitionId, x: finalTo.x };
     }
     if (nextState.mustDropState?.pieceId === pieceId) nextState.mustDropState = null; 
+  } else if (isGhostDetachment) {
+    // ★追加：霊の離脱・直接憑依ロジック
+    const targetAtDest = nextPieces.find(p => p.id !== activePiece.id && !PIECE_DEFINITIONS[p.definitionId]?.tags?.includes('trap') && getOccupiedPositions(p).some(pos => pos.x === finalTo.x && pos.y === finalTo.y));
+
+    // まず現在のホストから霊を剥がす
+    nextPieces = nextPieces.map(p => {
+      if (p.id === activePiece.id) {
+        const newComps = { ...p.components };
+        delete newComps.ghostAttached;
+        const origOwner = newComps.originalOwner || (p.owner === 'player1' ? 'player2' : 'player1');
+        delete newComps.originalOwner;
+        return { ...p, owner: origOwner, components: newComps }; // ★元の所有者に戻す
+      }
+      return p;
+    });
+
+    if (targetAtDest) {
+      // 移動先に敵がいたら直接「再憑依」
+      nextPieces = nextPieces.map(p => p.id === targetAtDest.id 
+        ? { 
+            ...p, 
+            owner: nextState.currentPlayer, // ★所有者を変更
+            components: { 
+              ...p.components, 
+              ghostAttached: nextState.currentPlayer, 
+              originalOwner: p.owner // ★元の所有者を記録
+            } 
+          } 
+        : p
+      );
+    } else {
+      // 空きマスなら霊コマを実体化して離脱
+      nextPieces.push({
+        id: `${nextState.currentPlayer}_ghost_detached_${Date.now()}`,
+        definitionId: 'ghost',
+        owner: nextState.currentPlayer,
+        position: finalTo,
+        components: {}
+      });
+    }
+    lastActionData = { type: 'move' };
   } else if (isPusher) {
     const dx = Math.sign(finalTo.x - activePiece.position.x);
     const dy = Math.sign(finalTo.y - activePiece.position.y);
@@ -322,9 +380,12 @@ const newHits = nextPieces.filter(p => p.id !== activePiece.id && !groupIds.has(
              //target.components.possessed = steppingPiece.definitionId;
              //nextPieces = nextPieces.filter(p => p.id !== steppingPiece.id); 
           //}
-          if (steppingPiece?.definitionId === 'ghost' && !steppingPiece.components?.possessed) {
-             steppingPiece.components.possessed = target.definitionId;
-             nextPieces = nextPieces.filter(p => p.id !== target.id);
+          if (steppingPiece?.definitionId === 'ghost') {
+            // 霊自身は消滅し、押されたターゲットに霊の所有者を記録
+            target.components.ghostAttached = steppingPiece.owner;
+            target.components.originalOwner = target.owner; // ★元の所有者を記録
+            target.owner = steppingPiece.owner; // ★所有者を変更
+            nextPieces = nextPieces.filter(p => p.id !== steppingPiece.id);
           } else if (target.definitionId !== 'twin_assassin') {
             let captured = { ...target };
             if (captured.definitionId === 'wolf') delete captured.components.mimicRole;
@@ -397,10 +458,26 @@ if (targetPieces.length > 0) {
   
   nextPieces = combatResult.nextBoard;
   promotionCanceled = combatResult.promotionCanceled;
-} else {
-      nextPieces = nextPieces.map(p => p.id === activePiece.id ? { ...p, position: finalTo, components: { ...p.components, useCount: newUseCount ?? p.components.useCount } } : p);
-    }
-    lastActionData = { type: 'move' };
+}  else {
+  // もし「霊が憑依中のコマ」を動かそうとした場合 ＝ 霊の離脱移動
+  if (activePiece.components?.ghostAttached === nextState.currentPlayer) {
+    // 1. ホストから霊を取り除く
+    nextPieces = nextPieces.map(p => p.id === activePiece.id ? { ...p, components: { ...p.components, ghostAttached: undefined } } : p);
+    // 2. 移動先に新しく「霊」のコマを生成する
+    nextPieces.push({
+      id: `${nextState.currentPlayer}_ghost_detached_${Date.now()}`,
+      definitionId: 'ghost',
+      owner: nextState.currentPlayer,
+      position: finalTo,
+      components: {}
+    });
+  } else {
+  // ★変更：古い霊離脱ロジックを削除し、純粋な通常移動のみに
+  nextPieces = nextPieces.map(p => p.id === activePiece.id ? { ...p, position: finalTo, components: { ...p.components, useCount: newUseCount ?? p.components.useCount } } : p);
+  promotionCanceled = false; // 通常移動なので成りキャンセルはなし
+  }
+}
+lastActionData = { type: 'move' };
   }
 
   nextState.pieces = nextPieces;

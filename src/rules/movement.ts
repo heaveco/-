@@ -9,6 +9,17 @@ export const getEffectiveDefinition = (piece: Piece) => {
   if (piece.definitionId === 'wolf' && piece.components?.mimicRole) {
     return PIECE_DEFINITIONS[piece.components.mimicRole];
   }
+  
+  // ★ 追加：霊が憑依している場合、サイズだけを憑依先から借りる
+  if (piece.definitionId === 'ghost' && piece.components?.possessed) {
+    const ghostDef = PIECE_DEFINITIONS['ghost'];
+    const possessedDef = PIECE_DEFINITIONS[piece.components.possessed];
+    return {
+      ...ghostDef,
+      size: possessedDef?.size || { width: 1, height: 1 }
+    };
+  }
+  
   return PIECE_DEFINITIONS[piece.definitionId];
 };
 
@@ -96,7 +107,47 @@ export const checkPushFeasibility = (pusher: Piece, targetPos: Position, board: 
   return true;
 };
 
-export const calculateMovablePositions = (piece: Piece, board: Piece[], turnCount: number = 1): Position[] => {
+export const calculateMovablePositions = (piece: Piece, board: Piece[], turnCount: number = 1, currentPlayer?: string): Position[] => {
+  // ★変更：憑依されている駒（ホスト）の移動制限 と 霊の離脱移動の計算をここに統合
+  if (piece.components?.ghostAttached) {
+    if (currentPlayer && piece.components.ghostAttached !== currentPlayer) {
+      // ホスト側のプレイヤーが触った場合：動けない
+      return [];
+    } else if (currentPlayer && piece.components.ghostAttached === currentPlayer) {
+      // 霊側のプレイヤーが触った場合：霊の離脱（移動）を計算する
+      const ghostDef = PIECE_DEFINITIONS['ghost'];
+      const movablePositions: Position[] = [];
+      const dir = getDirectionMultiplier(piece.components.ghostAttached);
+      
+      const origins = getOccupiedPositions(piece);
+      
+      origins.forEach(origin => {
+        ghostDef.moveRules.forEach(rule => {
+           if (rule.generator === 'relative') {
+             rule.params.forEach(param => {
+               movablePositions.push({ x: origin.x + param.dx, y: origin.y + (param.dy * dir) });
+             });
+           }
+        });
+      });
+      
+      const uniquePos: Position[] = [];
+      movablePositions.forEach(pos => {
+         if (!uniquePos.some(p => p.x === pos.x && p.y === pos.y)) uniquePos.push(pos);
+      });
+
+      // 盤面内・ホスト自身を除外した上で、「自分の味方コマ」がいるマスも除外（敵コマには重なれる）
+      return uniquePos.filter(pos => {
+        if (pos.x < 0 || pos.x > 4 || pos.y < 0 || pos.y > 4) return false;
+        if (origins.some(o => o.x === pos.x && o.y === pos.y)) return false;
+        
+        const destPiece = board.find(p => p.id !== piece.id && !PIECE_DEFINITIONS[p.definitionId]?.tags?.includes('trap') && getOccupiedPositions(p).some(dp => dp.x === pos.x && dp.y === pos.y));
+        if (destPiece && destPiece.owner === currentPlayer) return false; // 味方には憑依できない
+        
+        return true;
+      });
+    }
+  }
   const definition = getEffectiveDefinition(piece);
   if (!definition) return [];
   if (definition.tags?.includes('requires_turn_5') && turnCount < 5) return [];
@@ -187,6 +238,7 @@ export const calculateMovablePositions = (piece: Piece, board: Piece[], turnCoun
 
     return true;
   });
+
 };
 
 export const checkPromotion = (piece: Piece, newPos: Position): boolean => {

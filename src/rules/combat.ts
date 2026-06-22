@@ -110,12 +110,19 @@ export const resolveCombat = (
       attackerFinalPos = calcStopPos();
       isMoveBlocked = true;
     }
-    else if (attacker.definitionId === 'ghost' && !attacker.components?.possessed) {
-      // ghost は2体同時攻撃の対象外だが単体時の処理は維持
-      nextBoard = nextBoard.filter(p => p.id !== actualTarget.id);
-      attackerFinalPos = clickedPos;
-      nextBoard = nextBoard.map(p => p.id === attacker.id
-        ? { ...p, position: attackerFinalPos, components: { ...p.components, possessed: actualTarget.definitionId } }
+    else if (attacker.definitionId === 'ghost') {
+      // 霊自身は消滅し、対象に「憑依」状態を付与する（対象のサイズは維持される）
+      nextBoard = nextBoard.filter(p => p.id !== attacker.id); // 攻撃側の霊を消す
+      nextBoard = nextBoard.map(p => p.id === actualTarget.id
+        ? { 
+            ...p, 
+            owner: attacker.owner, // ★所有者を霊の持ち主に変更
+            components: { 
+              ...p.components, 
+              ghostAttached: attacker.owner, 
+              originalOwner: p.owner // ★元の所有者を記録
+            } 
+          }
         : p
       );
       return { nextBoard, capturedPieces: [], promotionCanceled: false };
@@ -162,7 +169,10 @@ export const resolveCombat = (
           });
         } else {
           nextBoard = nextBoard.filter(p => p.id !== actualTarget.id);
-          capturedPieces.push({ ...actualTarget, components: { ...actualTarget.components, hp: 2 } });
+          // ★追加：憑依されている場合は持ち駒に追加せず「破壊」
+          if (!actualTarget.components?.ghostAttached) {
+            capturedPieces.push({ ...actualTarget, components: { ...actualTarget.components, hp: 2 } });
+          }
           attackerFinalPos = clickedPos;
           isMoveBlocked = false;
         }
@@ -170,7 +180,10 @@ export const resolveCombat = (
     }
     else {
       nextBoard = nextBoard.filter(p => p.id !== actualTarget.id);
-      capturedPieces.push({ ...actualTarget, components: { ...actualTarget.components } });
+      // ★追加：憑依されている場合は持ち駒に追加せず「破壊」
+      if (!actualTarget.components?.ghostAttached) {
+        capturedPieces.push({ ...actualTarget, components: { ...actualTarget.components } });
+      }
       attackerFinalPos = clickedPos;
     }
 

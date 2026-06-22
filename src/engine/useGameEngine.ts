@@ -50,8 +50,8 @@ export const useGameEngine = (appState: string, roomId: string, myPlayerId: Play
         const inOwnZone = isP1 ? (p.position.y >= 2) : (p.position.y <= 2);
         if (inOwnZone) movablePositions.push(p.position);
       });
-    } else if (selectedBoardPiece) {
-      movablePositions = calculateMovablePositions(selectedBoardPiece, pieces, turnCount);
+    }  else if (selectedBoardPiece) {
+      movablePositions = calculateMovablePositions(selectedBoardPiece, pieces, turnCount, currentPlayer);
 
       if (selectedBoardPiece.definitionId === 'trickster') {
         movablePositions = movablePositions.filter(pos => Math.abs(pos.y - selectedBoardPiece.position.y) !== 4);
@@ -115,8 +115,22 @@ export const useGameEngine = (appState: string, roomId: string, myPlayerId: Play
 
     if (swapAbilityState?.step === 'selecting_target') {
       const clickedPiece = pieces.find(p => getOccupiedPositions(p).some(pos => pos.x === x && pos.y === y));
-      if (clickedPiece && clickedPiece.id !== swapAbilityState.pieceId) {
-        const def = getEffectiveDefinition(clickedPiece);
+
+    if (!activePiece && clickedPiece && clickedPiece.owner !== currentPlayer && clickedPiece.definitionId === 'wolf') {
+      dispatch({ type: 'SET_ACCUSE_STATE', payload: { targetPieceId: clickedPiece.id, step: 'confirm' } }); 
+      return;
+    }
+
+    // ★変更：「自分のコマ」または「自分の霊が憑依している敵コマ」であればタップ可能にする
+    const isMyPieceOrMyGhost = clickedPiece && (clickedPiece.owner === currentPlayer || clickedPiece.components?.ghostAttached === currentPlayer);
+
+    if (isMyPieceOrMyGhost) {
+      if (mustDropState?.playerId === currentPlayer) return;
+      if (turnState.isSecondMove && clickedPiece.id !== selectedPieceId) return;
+      
+      dispatch({ type: 'SET_SELECTED_PIECE', payload: { pieceId: clickedPiece.id } });
+
+      const def = getEffectiveDefinition(clickedPiece);
         const w = def?.size?.width || 1; const h = def?.size?.height || 1;
         if (w > 1 || h > 1) return; 
         
@@ -131,13 +145,21 @@ export const useGameEngine = (appState: string, roomId: string, myPlayerId: Play
       }
       return; 
     }
-
     const activePiece = selectedBoardPiece || selectedCapturedPiece;
 
     let chosenAnchor: Position | null = null;
     if (activePiece) {
+      // ★追加：霊の離脱かどうかを判定
+      const isGhostDetachment = !selectedCapturedPiece && activePiece.components?.ghostAttached === currentPlayer;
+
       for (const mPos of movablePositions) {
-        if (getOccupiedPositions({ ...activePiece, position: mPos }).some(pos => pos.x === x && pos.y === y)) { chosenAnchor = mPos; break; }
+        if (isGhostDetachment) {
+          // 霊の離脱時は、巨大ホストのサイズを無視して「霊自身(1x1)がそのマスにいるか」で直接判定
+          if (mPos.x === x && mPos.y === y) { chosenAnchor = mPos; break; }
+        } else {
+          // 通常移動時はホストのサイズで判定
+          if (getOccupiedPositions({ ...activePiece, position: mPos }).some(pos => pos.x === x && pos.y === y)) { chosenAnchor = mPos; break; }
+        }
       }
     }
 

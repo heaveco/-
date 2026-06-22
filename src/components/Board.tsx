@@ -35,7 +35,13 @@ export const Board: React.FC<Props> = ({ pieces, selectedPieceId, selectedCaptur
 
           let isMovable = false;
           if (activePiece) {
-            isMovable = movablePositions.some(mPos => getOccupiedPositions({ ...activePiece, position: mPos }).some(pos => pos.x === cell.x && pos.y === cell.y));
+            // ★修正：霊の離脱時は、ホストのサイズではなく 1x1 の単一座標として緑マスを判定する
+            const isGhostDetachment = !selectedCapturedPiece && activePiece.components?.ghostAttached === currentPlayer;
+            if (isGhostDetachment) {
+               isMovable = movablePositions.some(mPos => mPos.x === cell.x && mPos.y === cell.y);
+            } else {
+               isMovable = movablePositions.some(mPos => getOccupiedPositions({ ...activePiece, position: mPos }).some(pos => pos.x === cell.x && pos.y === cell.y));
+            }
           }
 
           const isExploding = explosions.some(e => e.x === cell.x && e.y === cell.y);
@@ -48,12 +54,10 @@ export const Board: React.FC<Props> = ({ pieces, selectedPieceId, selectedCaptur
 
           return (
             <div key={`${cell.x}-${cell.y}`} className={`relative w-16 h-16 flex items-center justify-center rounded transition-all duration-200 ${bgClass} ${zIndexClass}`} onClick={() => onCellClick(cell.x, cell.y)}>
-              {/* ★修正：不要な absolute や translate-x のラッパーを削除し、直接 Piece を呼び出す */}
               {pieceOnCellAnchor && isVisible ? (
                 <Piece piece={pieceOnCellAnchor} inHand={false} currentPlayer={currentPlayer} isFlipped={isFlipped} />
               ) : null}
 
-              {/* 爆発エフェクトの描画 */}
               {isExploding && (
                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-[100]">
                    <div className="absolute w-24 h-24 bg-red-500 rounded-full mix-blend-screen animate-ping opacity-75"></div>

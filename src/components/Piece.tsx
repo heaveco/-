@@ -36,6 +36,10 @@ export const Piece: React.FC<Props> = ({ piece, inHand, currentPlayer, isFlipped
   if (piece.definitionId === 'ghost' && piece.components?.possessed) {
     displayName = `霊(${PIECE_DEFINITIONS[piece.components.possessed]?.name || '?'})`;
   }
+  // ★追加：憑依された駒（ホスト）の表示ロジック
+  if (piece.components?.ghostAttached) {
+    displayName = `霊(${PIECE_DEFINITIONS[piece.definitionId]?.name || '?'})`;
+  }
 
   // ★修正：白の賢人 または 反成 の能力使用後は「×」を表示
   if (isSageExhausted || isAntiPromoted) {

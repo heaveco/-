@@ -412,7 +412,10 @@ if (appState === 'menu') {
 
   const myPlayerLabel = appState === 'online_playing' ? (myPlayerId === 'player1' ? '【あなたは Player 1 (青) です】' : '【あなたは Player 2 (赤) です】') : '';
 
-  const isFlipped = appState === 'online_playing' && myPlayerId === 'player2';
+  const isOnline = appState === 'online_playing';
+  const isFlipped = isOnline 
+  ? myPlayerId === 'player2' 
+  : currentPlayer === 'player2'; // ローカルなら現在の手番に合わせて反転
 
   const displayPieces = pieces.map(p => {
     if (!isFlipped) return p;

@@ -35,8 +35,8 @@ export const evaluateVictoryConditions = (
 
   // 【勝利条件】王が盤面に存在するかチェック（従来の王手判定の一般化）
   // ※今後「偽装王」などが出た場合は、ここの検索条件を変えるだけで対応できます
-  const p1KingExists = currentPieces.some(p => p.owner === 'player1' && p.definitionId === 'king');
-  const p2KingExists = currentPieces.some(p => p.owner === 'player2' && p.definitionId === 'king');
+  const p1KingExists = currentPieces.some(p => (p.owner === 'player1' || p.components?.originalOwner === 'player1') && p.definitionId === 'king');
+  const p2KingExists = currentPieces.some(p => (p.owner === 'player2' || p.components?.originalOwner === 'player2') && p.definitionId === 'king');
 
   if (!p1KingExists) return { winner: 'player2', reason: '王将陥落（Player 1 の王が取られました）' };
   if (!p2KingExists) return { winner: 'player1', reason: '王将陥落（Player 2 の王が取られました）' };
