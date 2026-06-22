@@ -102,33 +102,31 @@ export const calculateMovablePositions = (piece: Piece, board: Piece[], turnCoun
         movablePositions.push({ x: piece.position.x + offset.dx, y: piece.position.y + (offset.dy * dir) });
       }
     } else if (rule.generator === 'edge_warp') {
-      const currentX = piece.position.x;
-      const currentY = piece.position.y;
-
-      // 1. 左端 (X=0) にいて、さらに左・左上へ行こうとした時のワープ
-      if (currentX === 0) {
-        movablePositions.push({ x: 4, y: currentY });          // 真左へのワープ
-        movablePositions.push({ x: 4, y: (currentY - 1 + 5) % 5 }); // 左上へのワープ
-      }
+      // 1. 現在のコマの定義情報を取得する
+      const def = PIECE_DEFINITIONS[piece.definitionId];
       
-      // 2. 右端 (X=4) にいて、さらに右・右上へ行こうとした時のワープ
-      if (currentX === 4) {
-        movablePositions.push({ x: 0, y: currentY });          // 真右へのワープ
-        movablePositions.push({ x: 0, y: (currentY - 1 + 5) % 5 }); // 右上へのワープ
-      }
+      // 2. そのコマが持つ「相対移動（relative）」のルールを探す
+      const relativeRule = def?.moveRules.find(r => r.generator === 'relative');
       
-      // 3. 上端 (Y=0) にいて、さらに上・左上・右上へ行こうとした時のワープ
-      if (currentY === 0) {
-        movablePositions.push({ x: currentX, y: 4 });          // 真上へのワープ
-        movablePositions.push({ x: (currentX - 1 + 5) % 5, y: 4 }); // 左上へのワープ
-        movablePositions.push({ x: (currentX + 1 + 5) % 5, y: 4 }); // 右上へのワープ
+      if (relativeRule) {
+        // 3. Player 1 (青) はそのまま、Player 2 (赤) は進行方向が逆になるため反転させる
+        const dir = piece.owner === 'player1' ? 1 : -1;
+        
+        // 4. すべての相対移動ルートを計算し、盤面外に出るものだけをワープ処理する
+        relativeRule.params.forEach(param => {
+          const nx = piece.position.x + (param.dx * dir);
+          const ny = piece.position.y + (param.dy * dir);
+          
+          // 盤面外（0未満、または4より大きい）に飛び出してしまう移動先のみを抽出
+          if (nx < 0 || nx > 4 || ny < 0 || ny > 4) {
+            movablePositions.push({
+              x: (nx % 5 + 5) % 5,
+              y: (ny % 5 + 5) % 5
+            });
+          }
+        });
       }
-      
-      // 4. 下端 (Y=4) にいて、さらに下へ行こうとした時のワープ
-      if (currentY === 4) {
-        movablePositions.push({ x: currentX, y: 0 });          // 真下へのワープ
-      }
-      }else if (rule.generator === 'straight') {
+    }else if (rule.generator === 'straight') {
       for (const offset of rule.params) {
         let curX = piece.position.x;
         let curY = piece.position.y;
