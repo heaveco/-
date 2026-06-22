@@ -6,8 +6,7 @@ import { PIECE_DEFINITIONS } from '../data/pieces';
 
 interface Props { piece: PieceType; inHand?: boolean; currentPlayer: PlayerId; isFlipped?: boolean; }
 
-
-export const Piece: React.FC<Props> = ({ piece, inHand, currentPlayer }) => {
+export const Piece: React.FC<Props> = ({ piece, inHand, currentPlayer, isFlipped }) => {
   const def = PIECE_DEFINITIONS[piece.definitionId];
   
   const isSageExhausted = piece.definitionId === 'white_sage' && piece.components?.isExhausted;
@@ -43,7 +42,8 @@ export const Piece: React.FC<Props> = ({ piece, inHand, currentPlayer }) => {
     displayName = '×';
   }
 
-let textSizeClass = 'text-lg';
+// 40行目付近: テキストサイズのロジックを修正
+  let textSizeClass = 'text-lg';
   if (displayName.length === 2) textSizeClass = 'text-sm';
   else if (displayName.length === 3 || displayName.length === 4) textSizeClass = 'text-xs leading-tight tracking-tighter';
   else if (displayName.length >= 5) textSizeClass = 'text-[9px] leading-none tracking-tighter'; // ★追加: 超長文用
