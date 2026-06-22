@@ -3,7 +3,7 @@ import React from 'react';
 import type { Piece as PieceType, Position, PlayerId } from '../entities/types';
 import { Piece } from './Piece';
 import { getOccupiedPositions } from '../rules/movement';
-import { PIECE_DEFINITIONS } from '../data/pieces'; // ★新規追加：コマの定義を読み込む
+import { PIECE_DEFINITIONS } from '../data/pieces'; 
 
 interface Props {
   pieces: PieceType[];
@@ -12,10 +12,11 @@ interface Props {
   movablePositions: Position[];
   onCellClick: (x: number, y: number) => void;
   currentPlayer: PlayerId;
-  isFlipped: boolean; // ★新規追加
+  isFlipped: boolean; 
+  explosions?: Position[]; // ★追加
 }
 
-export const Board: React.FC<Props> = ({ pieces, selectedPieceId, selectedCapturedPiece, movablePositions, onCellClick, currentPlayer, isFlipped }) => {
+export const Board: React.FC<Props> = ({ pieces, selectedPieceId, selectedCapturedPiece, movablePositions, onCellClick, currentPlayer, isFlipped, explosions = [] }) => {
   const cells = Array.from({ length: 25 }, (_, i) => ({ x: i % 5, y: Math.floor(i / 5) }));
   const activePiece = pieces.find(p => p.id === selectedPieceId) || selectedCapturedPiece;
 
@@ -24,13 +25,7 @@ export const Board: React.FC<Props> = ({ pieces, selectedPieceId, selectedCaptur
       <div className="grid grid-cols-5 gap-1 bg-gray-700 p-2 rounded-lg relative">
         {cells.map((cell) => {
           const pieceOnCellAnchor = pieces.find(p => p.position.x === cell.x && p.position.y === cell.y);
-
-          // ★新規追加：このマスにあるコマが現在プレイヤーに見えているかを判定
-          let isVisible = false;
-          if (pieceOnCellAnchor) {
-            const def = PIECE_DEFINITIONS[pieceOnCellAnchor.definitionId];
-            isVisible = !(def?.tags?.includes('invisible_to_enemy') && pieceOnCellAnchor.owner !== currentPlayer);
-          }
+          const isVisible = !(PIECE_DEFINITIONS[pieceOnCellAnchor?.definitionId || '']?.tags?.includes('invisible_to_enemy') && pieceOnCellAnchor?.owner !== currentPlayer);
 
           let isSelected = false;
           if (selectedPieceId) {
@@ -43,20 +38,29 @@ export const Board: React.FC<Props> = ({ pieces, selectedPieceId, selectedCaptur
             isMovable = movablePositions.some(mPos => getOccupiedPositions({ ...activePiece, position: mPos }).some(pos => pos.x === cell.x && pos.y === cell.y));
           }
 
+          // ★追加：このマスで爆発が起きているか判定
+          const isExploding = explosions.some(e => e.x === cell.x && e.y === cell.y);
+
           let bgClass = 'bg-gray-300 hover:bg-gray-400';
           if (isSelected) bgClass = 'bg-yellow-200 shadow-[0_0_15px_rgba(253,224,71,0.6)]';
           else if (isMovable) bgClass = 'bg-green-300 shadow-[inset_0_0_10px_rgba(34,197,94,0.5)] cursor-pointer';
 
-          // ★変更：見えないコマの場合は重なり(z-index)も0にする
           const zIndexClass = (pieceOnCellAnchor && isVisible) ? 'z-30' : (isSelected || isMovable ? 'z-10' : 'z-0');
 
           return (
             <div key={`${cell.x}-${cell.y}`} className={`relative w-16 h-16 flex items-center justify-center rounded transition-all duration-200 ${bgClass} ${zIndexClass}`} onClick={() => onCellClick(cell.x, cell.y)}>
               {pieceOnCellAnchor && isVisible ? (
-                // ★変更：見えないコマの場合は <Piece> を呼ばず、代わりに座標テキストを表示する
-                <Piece piece={pieceOnCellAnchor} currentPlayer={currentPlayer} isFlipped={isFlipped} />
-              ) : (
-                <span className="text-xs text-gray-500 opacity-50 select-none pointer-events-none">{cell.x},{cell.y}</span>
+                <div className={`absolute top-0 left-0 ${PIECE_DEFINITIONS[pieceOnCellAnchor.definitionId]?.size?.width === 2 ? '-translate-x-[68px]' : ''}`}>
+                  <Piece piece={pieceOnCellAnchor} inHand={false} currentPlayer={currentPlayer} isFlipped={isFlipped} />
+                </div>
+              ) : null}
+
+              {/* ★新規追加：爆発エフェクトの描画 */}
+              {isExploding && (
+                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-[100]">
+                   <div className="absolute w-24 h-24 bg-red-500 rounded-full mix-blend-screen animate-ping opacity-75"></div>
+                   <div className="absolute text-6xl animate-bounce">💥</div>
+                 </div>
               )}
             </div>
           );

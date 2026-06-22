@@ -26,10 +26,7 @@ const WaitingForOpponent = ({ title, actionName }: { title: string, actionName: 
 function App() {
   const [appState, setAppState] = useState<'menu' | 'local' | 'online_menu' | 'online_playing'>('menu');
   const [roomIdInput, setRoomIdInput] = useState('');
-  
-  // ★新規追加：現在実際に接続している「本当の部屋ID」を記憶する箱（野良対戦のランダムIDを保存するため）
   const [activeRoomId, setActiveRoomId] = useState(''); 
-  
   const [useTimerToggle, setUseTimerToggle] = useState(false);
   const [onlineStatusMsg, setOnlineStatusMsg] = useState(''); 
   const [myPlayerId, setMyPlayerId] = useState<'player1' | 'player2' | null>(null);
@@ -37,11 +34,10 @@ function App() {
   const [placementTimer, setPlacementTimer] = useState<number | null>(null);
   const [turnTimer, setTurnTimer] = useState<number | null>(null); 
 
-  // ★変更：エンジンには roomIdInput ではなく、実際の接続先である activeRoomId を渡す！
   const { 
     phase, pieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, movablePositions, pendingPromotion, winner, resetGame,
     chohanState, rouletteState, turnState, turnSkipState, wolfDeclaration, accuseState, turnCount, mustDropState, pendingBombActivation, bulletMinigameData,
-    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState, ruleSettings, dispatch, 
+    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState, ruleSettings, explosions, dispatch, clearExplosions, // ★追加
     handleCellClick, handleCapturedClick, resolvePromotion, resolveWolfDeclaration, proceedAccusation, cancelAccusation, resolveAccusation, closeAccusationResult, 
     playChohan, resolveChohan, startRoulette, resolveRoulette, resolveBombActivation, resolveBullet,
     startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation, resolveSwapAbility, resolveGambleJump, cancelGambleJump
@@ -51,6 +47,39 @@ function App() {
   const activeQueue = phase === 'placement_p1' ? p1Queue : phase === 'placement_p2' ? p2Queue : phase === 'trap_placement_p1' ? p1TrapQueue : phase === 'trap_placement_p2' ? p2TrapQueue : [];
   const nextPieceId = activeQueue[0];
   const nextPieceName = nextPieceId ? PIECE_DEFINITIONS[nextPieceId]?.name : '';
+
+  // ============================================================================
+  // ★新規追加：ローカル対戦時の「端末受け渡し」画面の制御
+  // ============================================================================
+  const [showPassDevice, setShowPassDevice] = useState(false);
+  const prevAppState = useRef(appState);
+  const prevPlayer = useRef(currentPlayer);
+  const prevPhase = useRef(phase);
+
+  useEffect(() => {
+    if (appState === 'local' && !winner) {
+      if (prevAppState.current !== 'local') {
+        setShowPassDevice(true); // ゲーム開始時
+      } else if (prevPlayer.current !== currentPlayer) {
+        setShowPassDevice(true); // ターン交代時
+      } else if (prevPhase.current === 'finished' && phase === 'placement_p1') {
+        setShowPassDevice(true); // リセット時
+      }
+    }
+    prevAppState.current = appState;
+    prevPlayer.current = currentPlayer;
+    prevPhase.current = phase;
+  }, [appState, currentPlayer, phase, winner]);
+
+  // ★新規追加：爆発アニメーションを1.2秒で消す
+  useEffect(() => {
+    if (explosions && explosions.length > 0) {
+      const timer = setTimeout(() => {
+        clearExplosions();
+      }, 1200);
+      return () => clearTimeout(timer);
+    }
+  }, [explosions, clearExplosions]);
 
   useEffect(() => {
     const isPlacement = phase.startsWith('placement') || phase.startsWith('trap_placement');
@@ -220,8 +249,6 @@ function App() {
     socket.connect();
 
     socket.on('error_message', (msg) => { alert(`エラー: ${msg}`); setOnlineStatusMsg(''); });
-    
-    // ★変更：部屋が作成/接続された時に「サーバーから渡された本当の部屋ID」を activeRoomId に保存する
     socket.on('room_created', (data) => {
       setOnlineStatusMsg(`部屋 [${data.roomId}] を作成しました。対戦相手を待っています...`);
       setMyPlayerId(data.playerId);
@@ -232,16 +259,13 @@ function App() {
       setMyPlayerId(data.playerId); 
       setActiveRoomId(data.roomId);
     });
-    
     socket.on('waiting_random', () => {
       setOnlineStatusMsg('野良対戦の相手を探しています...');
     });
-    
     socket.on('game_start', (data) => {
       console.log(data.message); 
       setAppState('online_playing'); 
     });
-    
     socket.on('opponent_disconnected', () => {
       alert('相手との通信が切断されました（退出または通信エラー）。タイトルに戻ります。');
       resetGame(); setAppState('menu'); setOnlineStatusMsg(''); setMyPlayerId(null); setActiveRoomId('');
@@ -266,7 +290,7 @@ function App() {
 
   const handleBackToTitle = () => {
     if (appState === 'online_playing' || appState === 'online_menu') {
-      socket.emit('leave_room', activeRoomId); // ★退出時も本当の部屋IDを使う
+      socket.emit('leave_room', activeRoomId); 
       socket.emit('leave_random');
     }
     resetGame(); setAppState('menu'); setOnlineStatusMsg(''); setMyPlayerId(null); setActiveRoomId('');
@@ -308,7 +332,6 @@ function App() {
             </div>
           ) : (
             <>
-              {/* 合言葉マッチング */}
               <div className="mb-8">
                 <input type="text" placeholder="合言葉 (例: banana123)" value={roomIdInput} onChange={(e) => setRoomIdInput(e.target.value)} className="w-full p-4 mb-4 rounded-xl bg-gray-900 border-2 border-gray-700 text-xl font-bold text-center text-green-400" />
                 <label className="flex items-center justify-center gap-2 mb-4 text-gray-300 cursor-pointer">
@@ -321,7 +344,6 @@ function App() {
                 </div>
               </div>
 
-              {/* 野良対戦（ランダムマッチ） */}
               <div className="pt-8 border-t border-gray-600">
                 <h3 className="text-xl font-bold text-yellow-400 mb-4">世界中の誰かと対戦 (野良)</h3>
                 <div className="flex flex-col gap-3">
@@ -336,9 +358,6 @@ function App() {
     );
   }
 
-  // ============================================================================
-  // 対戦画面
-  // ============================================================================
   let statusText = '';
   if (winner) statusText = 'ゲーム終了！';
   else if (phase === 'placement_p1') statusText = '【配置】Player 1 (青) : 一番手前の列に駒を置いてください';
@@ -370,6 +389,12 @@ function App() {
     return { x: 4 - pos.x, y: 4 - pos.y };
   });
 
+  // ★追加：爆発の座標も反転させる
+  const displayExplosions = (explosions || []).map(pos => {
+    if (!isFlipped) return pos;
+    return { x: 4 - pos.x, y: 4 - pos.y };
+  });
+
   const handleBoardClick = (x: number, y: number) => {
     if (isFlipped) {
       handleCellClick(4 - x, 4 - y);
@@ -385,6 +410,32 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white font-sans relative pb-10 overflow-hidden pt-4">
+      
+      {/* ============================================================================ */}
+      {/* ★新規追加：ローカル対戦時の端末受け渡し画面オーバーレイ */}
+      {/* ============================================================================ */}
+      {appState === 'local' && showPassDevice && !winner && (
+        <div className="absolute inset-0 bg-gray-900 z-[100] flex flex-col items-center justify-center">
+          <div className="text-8xl mb-8 animate-bounce">{currentPlayer === 'player1' ? '🟦' : '🟥'}</div>
+          <h2 className="text-3xl md:text-5xl font-bold text-white mb-6 text-center px-4 leading-relaxed">
+            {phase === 'placement_p1' ? '【駒の配置】 Player 1 (青) の番です' :
+             phase === 'placement_p2' ? '【駒の配置】 Player 2 (赤) の番です' :
+             phase === 'trap_placement_p1' ? '【地雷配置】 Player 1 (青) の番です' :
+             phase === 'trap_placement_p2' ? '【地雷配置】 Player 2 (赤) の番です' :
+             phase === 'renda_quota_p1' ? '【妨害設定】 Player 1 (青) の番です' :
+             phase === 'renda_quota_p2' ? '【妨害設定】 Player 2 (赤) の番です' :
+             `Turn ${turnCount}: Player ${currentPlayer === 'player1' ? '1 (青)' : '2 (赤)'} の番です`}
+          </h2>
+          <p className="text-gray-400 mb-12 text-lg">端末を渡してください。準備ができたらボタンを押してください。</p>
+          <button 
+            onClick={() => setShowPassDevice(false)} 
+            className="px-10 py-5 bg-blue-600 hover:bg-blue-500 rounded-xl text-2xl font-bold shadow-[0_0_20px_rgba(37,99,235,0.5)] transform active:scale-95 transition-all"
+          >
+            準備完了
+          </button>
+        </div>
+      )}
+
       <div className="absolute top-4 left-4 z-20">
         {appState === 'online_playing' ? (
           <button onClick={handleResign} className="px-4 py-2 bg-red-900 hover:bg-red-800 border border-red-500 rounded-lg text-sm font-bold shadow-lg flex items-center gap-2">🏳️ 投了する</button>
@@ -427,7 +478,6 @@ function App() {
       </div>
 
       <div className="max-w-2xl mx-auto px-4 flex flex-col items-center gap-4 mt-4">
-        {/* 上側の持ち駒 */}
         <div className={`w-full bg-opacity-30 p-4 rounded-lg min-h-[80px] border ${TopPlayer === 'player1' ? 'bg-blue-900 border-blue-900' : 'bg-red-900 border-red-900'}`}>
           <p className={`text-sm font-bold mb-2 ${TopPlayer === 'player1' ? 'text-blue-300' : 'text-red-300'}`}>{TopPlayer === 'player1' ? 'Player 1 の持ち駒' : 'Player 2 の持ち駒'}</p>
           <div className="flex flex-wrap gap-2">
@@ -441,18 +491,9 @@ function App() {
 
         {/* 盤面本体 */}
         <div className="w-full flex justify-center transition-opacity duration-500">
-          <Board 
-            pieces={displayPieces} 
-            selectedPieceId={selectedPieceId} 
-            selectedCapturedPiece={capturedPieces.find(p => p.id === selectedPieceId)} 
-            movablePositions={displayMovablePositions} 
-            onCellClick={handleBoardClick} 
-            currentPlayer={currentPlayer} 
-            isFlipped={isFlipped} // ★これを追加
-            />
+          <Board pieces={displayPieces} selectedPieceId={selectedPieceId} selectedCapturedPiece={capturedPieces.find(p => p.id === selectedPieceId)} movablePositions={displayMovablePositions} onCellClick={handleBoardClick} currentPlayer={currentPlayer} isFlipped={isFlipped} explosions={displayExplosions} />
         </div>
 
-        {/* 下側の持ち駒 */}
         <div className={`w-full bg-opacity-30 p-4 rounded-lg min-h-[80px] border ${BottomPlayer === 'player1' ? 'bg-blue-900 border-blue-900' : 'bg-red-900 border-red-900'}`}>
           <p className={`text-sm font-bold mb-2 ${BottomPlayer === 'player1' ? 'text-blue-300' : 'text-red-300'}`}>{BottomPlayer === 'player1' ? 'Player 1 の持ち駒' : 'Player 2 の持ち駒'}</p>
           <div className="flex flex-wrap gap-2">
@@ -465,7 +506,6 @@ function App() {
         </div>
       </div>
 
-      {/* --- 各種イベントUI --- */}
       {phase === 'minigame_gamble_jump' && (
         <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
           <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-2 border-green-500 max-w-md w-full">

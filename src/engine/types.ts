@@ -29,8 +29,8 @@ export interface GameState {
   wolfDeclaration: any | null;
   accuseState: any | null;
   swapAbilityState: { pieceId: string; step: 'ask' | 'selecting_target' | 'confirm'; targetPieceId?: string } | null;
-  // ★新規追加：部屋のルール設定（タイマーの有無など）
   ruleSettings?: { useTurnTimer: boolean };
+  explosions?: Position[]; // ★新規追加：爆発エフェクトの座標リスト
 }
 
 export type GameAction = 
@@ -70,6 +70,6 @@ export type GameAction =
   | { type: 'SET_CHOHAN_STATE'; payload: any | null }
   | { type: 'SET_SWAP_ABILITY_STATE'; payload: any | null }
   | { type: 'START_BULLET_MINIGAME'; payload: { pieceId: string } }
-  // ★新規追加：投了と時間切れスキップ
   | { type: 'RESIGN'; payload: { playerId: PlayerId } }
-  | { type: 'SKIP_TURN'; payload: { playerId: PlayerId } };
+  | { type: 'SKIP_TURN'; payload: { playerId: PlayerId } }
+  | { type: 'CLEAR_EXPLOSIONS' }; // ★新規追加：エフェクト消去

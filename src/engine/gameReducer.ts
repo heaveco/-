@@ -62,14 +62,15 @@ export const getInitialGameState = (): GameState => {
     bulletMinigameData: null, pendingMineConfirmation: null,
     turnState: { hasDoubledUp: false, isSecondMove: false }, turnSkipState: { player1: false, player2: false },
     pendingAction: null, chohanState: null, rouletteState: null, wolfDeclaration: null, accuseState: null, swapAbilityState: null,
-    ruleSettings: { useTurnTimer: false }
+    ruleSettings: { useTurnTimer: false },
+    explosions: [] // ★追加
   };
 };
 
 const handleTurnStartEvents = (state: GameState, nextPlayer: PlayerId, currentBoard: Piece[]) => {
-  // ... (そのまま維持) ...
   let nextBoard = [...currentBoard];
   let newWinner: VictoryResult | null = null;
+  let newExplosions: Position[] = []; // ★追加
   
   nextBoard = nextBoard.map(p => {
     let newComps = { ...p.components };
@@ -94,6 +95,7 @@ const handleTurnStartEvents = (state: GameState, nextPlayer: PlayerId, currentBo
   if (explodingBombs.length > 0) {
     let allExAreas: Position[] = [];
     explodingBombs.forEach(b => {
+      newExplosions.push({ x: b.position.x, y: b.position.y }); // ★時限爆弾のエフェクト
       const bx = b.position.x; const by = b.position.y;
       allExAreas.push({x:bx-1, y:by-1}, {x:bx, y:by-1}, {x:bx+1, y:by-1}, {x:bx-1, y:by}, {x:bx, y:by}, {x:bx+1, y:by}, {x:bx-1, y:by+1}, {x:bx, y:by+1}, {x:bx+1, y:by+1});
     });
@@ -120,18 +122,18 @@ const handleTurnStartEvents = (state: GameState, nextPlayer: PlayerId, currentBo
       return !isHit; 
     });
   }
-  return { nextBoard, newWinner };
+  return { nextBoard, newWinner, newExplosions }; // ★追加
 };
 
 const endCurrentTurn = (state: GameState, tempPieces: Piece[] = state.pieces): GameState => {
-  // ... (そのまま維持) ...
   let nextState = { ...state };
   const nextPlayer = nextState.currentPlayer === 'player1' ? 'player2' : 'player1';
   nextState.turnState = { hasDoubledUp: false, isSecondMove: false };
   nextState.turnCount += 1;
   
-  const { nextBoard, newWinner } = handleTurnStartEvents(nextState, nextPlayer, tempPieces);
+  const { nextBoard, newWinner, newExplosions } = handleTurnStartEvents(nextState, nextPlayer, tempPieces);
   nextState.pieces = nextBoard;
+  nextState.explosions = [...(nextState.explosions || []), ...newExplosions]; // ★追加
   if (newWinner) nextState.winner = newWinner;
 
   if (nextState.turnSkipState[nextPlayer]) {
@@ -140,6 +142,7 @@ const endCurrentTurn = (state: GameState, tempPieces: Piece[] = state.pieces): G
     nextState.turnCount += 1;
     const res = handleTurnStartEvents(nextState, nextState.currentPlayer, nextBoard);
     nextState.pieces = res.nextBoard;
+    nextState.explosions = [...(nextState.explosions || []), ...res.newExplosions]; // ★追加
     if (res.newWinner) nextState.winner = res.newWinner;
   } else {
     nextState.currentPlayer = nextPlayer;
@@ -215,6 +218,8 @@ const executeMove = (state: GameState, payload: { pieceId: string, to: Position,
   }
 
   if (hitMineId) {
+    nextState.explosions = [...(nextState.explosions || []), finalTo]; // ★地雷を踏んだエフェクト
+
     if (isDrop) {
       nextCaptured = nextCaptured.filter(p => p.id !== pieceId);
       nextPieces = nextPieces.filter(p => p.id !== hitMineId);
@@ -293,6 +298,7 @@ const executeMove = (state: GameState, payload: { pieceId: string, to: Position,
         if (PIECE_DEFINITIONS[target.definitionId]?.tags?.includes('trap')) {
           const steppingPiece = pushedGroup.find(p => getOccupiedPositions({ ...p, position: { x: p.position.x + dx, y: p.position.y + dy } }).some(pos => getOccupiedPositions(target).some(tpos => tpos.x === pos.x && tpos.y === pos.y)));
           nextPieces = nextPieces.filter(p => p.id !== target.id && p.id !== steppingPiece?.id);
+          nextState.explosions = [...(nextState.explosions || []), target.position]; // ★玉突き地雷エフェクト
           if (steppingPiece?.definitionId === 'king') nextState.winner = { winner: O1 === 'player1' ? 'player2' : 'player1', reason: '玉突きで押し出された王が地雷を踏みました！' };
         } else {
           const steppingPiece = pushedGroup.find(p => getOccupiedPositions({ ...p, position: { x: p.position.x + dx, y: p.position.y + dy } }).some(pos => getOccupiedPositions(target).some(tpos => tpos.x === pos.x && tpos.y === pos.y)));
@@ -311,7 +317,7 @@ const executeMove = (state: GameState, payload: { pieceId: string, to: Position,
             let captured = { ...target };
             if (captured.definitionId === 'wolf') delete captured.components.mimicRole;
             if (captured.definitionId === 'nuisance') captured.definitionId = 'harm';
-            if (captured.definitionId === 'bomb'|| captured.definitionId === 'activated_bomb') { captured.components.isActivated = false; captured.components.bombTimer = 0; }
+            if (captured.definitionId === 'bomb' || captured.definitionId === 'activated_bomb') { captured.components.isActivated = false; captured.components.bombTimer = 0; }
             if (captured.definitionId === 'white_sage') captured.components.isExhausted = false;
             
             const capDef = captured.definitionId;
@@ -366,9 +372,9 @@ const executeMove = (state: GameState, payload: { pieceId: string, to: Position,
   const victoryResult = evaluateVictoryConditions(nextState.pieces, nextState.currentPlayer, lastActionData);
   if (victoryResult) { nextState.selectedPieceId = null; nextState.winner = victoryResult; return nextState; }
 
-  const isBomb = activePiece.definitionId === 'bomb';
+  const isBomb = activePiece.definitionId === 'bomb' || activePiece.definitionId === 'activated_bomb';
   
-  if (isBomb && !hitMineId) { 
+  if (isBomb && !hitMineId && !activePiece.components?.isActivated) { 
     nextState.pendingBombActivation = { pieceId: activePiece.id }; 
     nextState.phase = 'bomb_activation'; 
   } else { 
@@ -392,12 +398,8 @@ const executeMove = (state: GameState, payload: { pieceId: string, to: Position,
   return nextState;
 };
 
-// ============================================================================
-// 【コアエンジン】StateとActionを受け取り、新しいStateを返す純粋関数
-// ============================================================================
 export const gameReducer = (state: GameState, action: GameAction): GameState => {
   switch (action.type) {
-    // ★変更：リセット時に、前のルールの設定（タイマーの有無など）を引き継ぐように修正
     case 'SYSTEM_RESET_GAME': {
       const freshState = getInitialGameState();
       return { ...freshState, ruleSettings: state.ruleSettings };
@@ -431,23 +433,25 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       nextState.phase = 'playing';
       return nextState;
     }
+
+    // ★追加：爆発エフェクトを消去するアクション
+    case 'CLEAR_EXPLOSIONS': {
+      return { ...state, explosions: [] };
+    }
+
     case 'PLACE_INITIAL_PIECE': {
       const { activePlayer, defId, x, y, isTrapPhase, wolfMimicRole } = action.payload;
       let nextState = { ...state };
-      
       const isP1 = activePlayer === 'player1';
       let curQ = isTrapPhase ? (isP1 ? nextState.p1TrapQueue : nextState.p2TrapQueue) : (isP1 ? nextState.p1Queue : nextState.p2Queue);
-      
       let newPieces = [...nextState.pieces];
 
       if (isTrapPhase) {
-        // ★新規追加：すでにその場所に相手の地雷があるか確認（相殺処理）
         const existingTrapIndex = newPieces.findIndex(p => p.position.x === x && p.position.y === y && PIECE_DEFINITIONS[p.definitionId]?.tags?.includes('trap'));
         if (existingTrapIndex !== -1) {
-          // 相殺：新しい地雷は追加せず、既存の地雷も消滅させる
           newPieces = newPieces.filter((_, idx) => idx !== existingTrapIndex);
+          nextState.explosions = [...(nextState.explosions || []), { x, y }]; // ★地雷同士の相殺エフェクト
         } else {
-          // 相手の地雷がなければ普通に追加
           const newPiece = { id: `${activePlayer}_${defId}_${Date.now()}`, definitionId: defId, owner: activePlayer, position: { x, y }, components: { ...(PIECE_DEFINITIONS[defId]?.defaultComponents || {}) } };
           if (wolfMimicRole) newPiece.components.mimicRole = wolfMimicRole;
           newPieces.push(newPiece);
@@ -459,27 +463,22 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       }
 
       nextState.pieces = newPieces;
-      
       curQ = curQ.slice(1);
       
       if (isTrapPhase) { if(isP1) nextState.p1TrapQueue = curQ; else nextState.p2TrapQueue = curQ; } 
       else { if(isP1) nextState.p1Queue = curQ; else nextState.p2Queue = curQ; }
 
       if (curQ.length === 0) { 
-         const np1 = nextState.p1Queue;
-         const np2 = nextState.p2Queue;
-         const nt1 = nextState.p1TrapQueue;
-         const nt2 = nextState.p2TrapQueue;
+         const np1 = nextState.p1Queue; const np2 = nextState.p2Queue;
+         const nt1 = nextState.p1TrapQueue; const nt2 = nextState.p2TrapQueue;
          const nextData = resolveNextPlacementPhase(np1, np2, nt1, nt2, newPieces, nextState.capturedPieces);
-         nextState.phase = nextData.phase; 
-         nextState.currentPlayer = nextData.player as PlayerId;
+         nextState.phase = nextData.phase; nextState.currentPlayer = nextData.player as PlayerId;
       }
       return nextState;
     }
 
-    case 'MOVE_PIECE':
-      return executeMove(state, action.payload);
-
+    // ... 以降のアクション群（MOVE_PIECE等）は変更なしでそのまま ...
+    case 'MOVE_PIECE': return executeMove(state, action.payload);
     case 'RESOLVE_PROMOTION': {
       if (!state.pendingPromotion) return state;
       let nextBoard = [...state.pieces];
@@ -505,7 +504,6 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       nextState.pendingPromotion = null;
       return nextState;
     }
-
     case 'RESOLVE_BOMB_ACTIVATION': {
       if (!state.pendingBombActivation) return state;
       let nextBoard = [...state.pieces];
@@ -517,7 +515,6 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       nextState.selectedPieceId = null;
       return nextState;
     }
-
     case 'RESOLVE_BULLET': {
       const { targetId } = action.payload;
       let nextState = { ...state };
@@ -535,7 +532,6 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       nextState.selectedPieceId = null;
       return nextState;
     }
-
     case 'RESOLVE_GAMBLE_JUMP': {
       const { x, y } = action.payload;
       if (!state.pendingAction) return state;
@@ -544,10 +540,7 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       nextState.pendingAction = null;
       return nextState;
     }
-
-    case 'CANCEL_GAMBLE_JUMP':
-      return { ...state, phase: 'playing', pendingAction: null, selectedPieceId: null };
-
+    case 'CANCEL_GAMBLE_JUMP': return { ...state, phase: 'playing', pendingAction: null, selectedPieceId: null };
     case 'RESOLVE_SWAP_ABILITY': {
       const { answer } = action.payload;
       let nextState = { ...state };
@@ -576,10 +569,7 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       }
       return nextState;
     }
-
-    case 'START_ROULETTE':
-      return { ...state, rouletteState: Math.random() < 0.1 ? 'win' : Math.random() < 0.2 ? 'lose' : 'miss', phase: 'minigame_roulette' };
-
+    case 'START_ROULETTE': return { ...state, rouletteState: Math.random() < 0.1 ? 'win' : Math.random() < 0.2 ? 'lose' : 'miss', phase: 'minigame_roulette' };
     case 'RESOLVE_ROULETTE': {
       let nextState = { ...state };
       if (nextState.rouletteState === 'win') nextState.winner = { winner: nextState.currentPlayer, reason: '特殊勝利！' };
@@ -588,7 +578,6 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       nextState.phase = 'playing'; nextState.rouletteState = null;
       return nextState;
     }
-
     case 'PLAY_CHOHAN': {
       const { guess, isDoubleUp } = action.payload;
       const isWin = ((Math.floor(Math.random()*6)+1 + Math.floor(Math.random()*6)+1) % 2 === 0) === (guess === 'cho');
@@ -596,7 +585,6 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       if (isDoubleUp) nextState.turnState = { ...nextState.turnState, hasDoubledUp: true };
       return nextState;
     }
-
     case 'RESOLVE_CHOHAN': {
       const { proceed } = action.payload;
       let nextState = { ...state };
@@ -610,7 +598,6 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       }
       return nextState;
     }
-
     case 'RESOLVE_WOLF_DECLARATION': {
       const { roleId } = action.payload;
       let nextState = { ...state };
@@ -636,13 +623,8 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       nextState.wolfDeclaration = null;
       return nextState;
     }
-
-    case 'PROCEED_ACCUSATION':
-      return { ...state, accuseState: { ...state.accuseState, step: action.payload.step, guessedRole: action.payload.guessedRole || state.accuseState?.guessedRole } };
-
-    case 'CANCEL_ACCUSATION':
-      return { ...state, accuseState: null };
-
+    case 'PROCEED_ACCUSATION': return { ...state, accuseState: { ...state.accuseState, step: action.payload.step, guessedRole: action.payload.guessedRole || state.accuseState?.guessedRole } };
+    case 'CANCEL_ACCUSATION': return { ...state, accuseState: null };
     case 'RESOLVE_ACCUSATION': {
       let nextState = { ...state };
       if (!nextState.accuseState) return state;
@@ -658,14 +640,12 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       }
       return nextState;
     }
-
     case 'CLOSE_ACCUSATION_RESULT': {
       let nextState = { ...state };
       if (nextState.accuseState?.isSuccess === false) nextState = endCurrentTurn(nextState, nextState.pieces);
       nextState.accuseState = null;
       return nextState;
     }
-
     case 'RESOLVE_MINE_CONFIRMATION': {
       let nextState = { ...state };
       if (!nextState.pendingMineConfirmation) return state;
@@ -685,7 +665,6 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       nextState.pendingMineConfirmation = null;
       return nextState;
     }
-
     case 'START_RENDA_SETTING': return { ...state, rendaSettingState: { clicks: 0, isActive: true, timeLeft: 2 } };
     case 'CLICK_RENDA_SETTING': return { ...state, rendaSettingState: state.rendaSettingState?.isActive ? { ...state.rendaSettingState, clicks: state.rendaSettingState.clicks + 1 } : state.rendaSettingState };
     case 'TICK_RENDA_SETTING': return { ...state, rendaSettingState: state.rendaSettingState ? { ...state.rendaSettingState, timeLeft: state.rendaSettingState.timeLeft - 1 } : null };
@@ -705,7 +684,6 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       nextState.rendaSettingState = null;
       return nextState;
     }
-
     case 'START_RENDA_PLAY': return { ...state, rendaPlayState: { clicks: 0, required: action.payload.required, isActive: false, timeLeft: 3 }, phase: 'minigame_renda_play' };
     case 'START_RENDA_PLAY_ACTIVATE': return { ...state, rendaPlayState: state.rendaPlayState ? { ...state.rendaPlayState, isActive: true } : null };
     case 'CLICK_RENDA_PLAY': return { ...state, rendaPlayState: state.rendaPlayState?.isActive ? { ...state.rendaPlayState, clicks: state.rendaPlayState.clicks + 1 } : state.rendaPlayState };
@@ -724,7 +702,6 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       nextState.rendaPlayState = null; nextState.pendingAction = null;
       return nextState;
     }
-
     case 'START_BULLET_MINIGAME': {
       const { pieceId } = action.payload;
       const enemies = state.pieces.filter(p => p.owner !== state.currentPlayer);
@@ -742,8 +719,6 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       
       return { ...state, selectedPieceId: pieceId, bulletMinigameData: { targets: absoluteTargets, speed: Math.floor(Math.random() * 400) + 300, initialOffset: Math.random() * 360 }, phase: 'minigame_bullet' };
     }
-
-    // --- UI層の直接State書き換え用 ---
     case 'SET_PHASE': return { ...state, phase: action.payload.phase };
     case 'SET_PENDING_ACTION': return { ...state, pendingAction: action.payload };
     case 'SET_SELECTED_PIECE': return { ...state, selectedPieceId: action.payload.pieceId };
@@ -751,9 +726,6 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
     case 'SET_ACCUSE_STATE': return { ...state, accuseState: action.payload };
     case 'SET_CHOHAN_STATE': return { ...state, chohanState: action.payload };
     case 'SET_SWAP_ABILITY_STATE': return { ...state, swapAbilityState: action.payload };
-
-    default:
-      console.warn('Unhandled Action:', action);
-      return state;
+    default: return state;
   }
 };
