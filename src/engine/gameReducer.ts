@@ -281,9 +281,20 @@ const executeMove = (state: GameState, payload: { pieceId: string, to: Position,
         isExpanding = false;
         const nextArea: Position[] = [];
         pushedGroup.forEach(p => getOccupiedPositions({ ...p, position: { x: p.position.x + dx, y: p.position.y + dy } }).forEach(pos => nextArea.push(pos)));
-        const newHits = nextPieces.filter(p => p.id !== activePiece.id && !groupIds.has(p.id) && getOccupiedPositions(p).some(pos => nextArea.some(na => na.x === pos.x && na.y === pos.y)));
-        const alliesInHits = newHits.filter(p => p.owner === O1);
-        if (alliesInHits.length > 0) { alliesInHits.forEach(p => { pushedGroup.push(p); groupIds.add(p.id); }); isExpanding = true; }
+const newHits = nextPieces.filter(p => p.id !== activePiece.id && !groupIds.has(p.id) && getOccupiedPositions(p).some(pos => nextArea.some(na => na.x === pos.x && na.y === pos.y)));
+        
+        let added = false;
+        newHits.forEach(hit => {
+          if (hit.owner === O1) {
+            pushedGroup.push(hit); groupIds.add(hit.id); added = true;
+          } else {
+            const steppingPiece = pushedGroup.find(p => getOccupiedPositions({ ...p, position: { x: p.position.x + dx, y: p.position.y + dy } }).some(pos => getOccupiedPositions(hit).some(hpos => hpos.x === pos.x && hpos.y === pos.y)));
+            if (steppingPiece && PIECE_DEFINITIONS[steppingPiece.definitionId]?.tags?.includes('cannot_capture')) {
+              pushedGroup.push(hit); groupIds.add(hit.id); added = true;
+            }
+          }
+        });
+        if (added) isExpanding = true;
       }
       const nextArea: Position[] = [];
       pushedGroup.forEach(p => getOccupiedPositions({ ...p, position: { x: p.position.x + dx, y: p.position.y + dy } }).forEach(pos => nextArea.push(pos)));
@@ -307,10 +318,11 @@ const executeMove = (state: GameState, payload: { pieceId: string, to: Position,
              const shield = nextPieces.find(p => p.owner === target.owner && p.definitionId === 'shield');
              if (shield) { nextPieces = nextPieces.filter(p => p.id !== shield.id); return; }
           }
-          if (target.definitionId === 'ghost' && !target.components?.possessed && steppingPiece) {
-             target.components.possessed = steppingPiece.definitionId;
-             nextPieces = nextPieces.filter(p => p.id !== steppingPiece.id); 
-          } else if (steppingPiece?.definitionId === 'ghost' && !steppingPiece.components?.possessed) {
+          //if (target.definitionId === 'ghost' && !target.components?.possessed && steppingPiece) {
+             //target.components.possessed = steppingPiece.definitionId;
+             //nextPieces = nextPieces.filter(p => p.id !== steppingPiece.id); 
+          //}
+          if (steppingPiece?.definitionId === 'ghost' && !steppingPiece.components?.possessed) {
              steppingPiece.components.possessed = target.definitionId;
              nextPieces = nextPieces.filter(p => p.id !== target.id);
           } else if (target.definitionId !== 'twin_assassin') {

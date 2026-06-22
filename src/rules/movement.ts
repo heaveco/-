@@ -53,11 +53,26 @@ export const checkPushFeasibility = (pusher: Piece, targetPos: Position, board: 
 
     if (nextArea.some(pos => pos.x < 0 || pos.x > 4 || pos.y < 0 || pos.y > 4)) return false;
 
+    // 変更後（異オーナーでも取得不可なら巻き込むロジック）
     const newHits = board.filter(p => p.id !== pusher.id && !groupIds.has(p.id) && getOccupiedPositions(p).some(pos => nextArea.some(na => na.x === pos.x && na.y === pos.y)));
-    const alliesInHits = newHits.filter(p => p.owner === O1);
     
-    if (alliesInHits.length > 0) {
-      alliesInHits.forEach(p => { pushedGroup.push(p); groupIds.add(p.id); });
+    let added = false;
+    newHits.forEach(hit => {
+      if (hit.owner === O1) {
+        // 味方なら連鎖して押される
+        pushedGroup.push(hit); groupIds.add(hit.id);
+        added = true;
+      } else {
+        // 敵の場合、ぶつかってきたコマ（steppingPiece）が取得不可(cannot_capture)なら連鎖して押される
+        const steppingPiece = pushedGroup.find(p => getOccupiedPositions({ ...p, position: { x: p.position.x + dx, y: p.position.y + dy } }).some(pos => getOccupiedPositions(hit).some(hpos => hpos.x === pos.x && hpos.y === pos.y)));
+        if (steppingPiece && PIECE_DEFINITIONS[steppingPiece.definitionId]?.tags?.includes('cannot_capture')) {
+          pushedGroup.push(hit); groupIds.add(hit.id);
+          added = true;
+        }
+      }
+    });
+
+    if (added) {
       isExpanding = true;
     }
   }

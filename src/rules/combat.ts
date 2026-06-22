@@ -23,7 +23,7 @@ const canFullyCapture = (target: Piece, damage: number): boolean => {
   // split_on_hit は分裂するだけで取得にならない
   if (def?.tags?.includes('split_on_hit')) return false;
   // ghost（未憑依）は取得にならない
-  if (target.definitionId === 'ghost' && !target.components?.possessed) return false;
+  //if (target.definitionId === 'ghost' && !target.components?.possessed) return false;
   // 通常駒は1ダメージで取得可能
   return true;
 };
@@ -120,14 +120,14 @@ export const resolveCombat = (
       );
       return { nextBoard, capturedPieces: [], promotionCanceled: false };
     }
-    else if (actualTarget.definitionId === 'ghost' && !actualTarget.components?.possessed) {
-      nextBoard = nextBoard.filter(p => p.id !== attacker.id);
-      nextBoard = nextBoard.map(p => p.id === actualTarget.id
-        ? { ...p, components: { ...p.components, possessed: attacker.definitionId } }
-        : p
-      );
-      return { nextBoard, capturedPieces: [], promotionCanceled: false };
-    }
+    //else if (actualTarget.definitionId === 'ghost' && !actualTarget.components?.possessed) {
+      //nextBoard = nextBoard.filter(p => p.id !== attacker.id);
+      //nextBoard = nextBoard.map(p => p.id === actualTarget.id
+        //? { ...p, components: { ...p.components, possessed: attacker.definitionId } }
+        //: p
+      //);
+      //return { nextBoard, capturedPieces: [], promotionCanceled: false };
+    //}
     else if (actualTargetDef?.tags?.includes('split_on_hit')) {
       nextBoard = nextBoard.filter(p => p.id !== actualTarget.id);
       attackerFinalPos = clickedPos;
