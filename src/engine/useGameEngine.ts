@@ -29,7 +29,7 @@ export const useGameEngine = (appState: string, roomId: string, myPlayerId: Play
   const {
     phase, pieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, pendingPromotion, winner,
     chohanState, rouletteState, turnState, turnSkipState, wolfDeclaration, accuseState, turnCount, mustDropState, pendingBombActivation, bulletMinigameData,
-    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState, ruleSettings, explosions // ★explosions追加
+    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState, pendingAction, ruleSettings
   } = state;
 
   const selectedBoardPiece = pieces.find(p => p.id === selectedPieceId);
@@ -52,9 +52,12 @@ export const useGameEngine = (appState: string, roomId: string, myPlayerId: Play
       });
     } else if (selectedBoardPiece) {
       movablePositions = calculateMovablePositions(selectedBoardPiece, pieces, turnCount);
+
+      // ★ 新規追加：成る前のトリックスターは、縦方向の移動（Y座標の差が4のワープ）を禁止する
       if (selectedBoardPiece.definitionId === 'trickster') {
         movablePositions = movablePositions.filter(pos => Math.abs(pos.y - selectedBoardPiece.position.y) !== 4);
       }
+
     } else if (selectedCapturedPiece) {
       const def = getEffectiveDefinition(selectedCapturedPiece);
       const w = def?.size?.width || 1; const h = def?.size?.height || 1;
@@ -213,15 +216,39 @@ export const useGameEngine = (appState: string, roomId: string, myPlayerId: Play
     }
   };
 
-  // ★追加：爆発エフェクトをクリアする関数
-  const clearExplosions = () => dispatch({ type: 'CLEAR_EXPLOSIONS' });
+  const resolvePromotion = (doPromote: boolean) => dispatch({ type: 'RESOLVE_PROMOTION', payload: { doPromote } });
+  const resolveWolfDeclaration = (roleId: string) => dispatch({ type: 'RESOLVE_WOLF_DECLARATION', payload: { roleId } });
+  const resetGame = () => dispatch({ type: 'SYSTEM_RESET_GAME' });
+  const proceedAccusation = (step: 'select'|'final', guessedRole?: string) => dispatch({ type: 'PROCEED_ACCUSATION', payload: { step, guessedRole } });
+  const cancelAccusation = () => dispatch({ type: 'CANCEL_ACCUSATION' });
+  const resolveAccusation = () => dispatch({ type: 'RESOLVE_ACCUSATION' });
+  const closeAccusationResult = () => dispatch({ type: 'CLOSE_ACCUSATION_RESULT' });
+  const playChohan = (guess: 'cho'|'han', isDoubleUp: boolean = false) => dispatch({ type: 'PLAY_CHOHAN', payload: { guess, isDoubleUp } });
+  const resolveChohan = (proceed: boolean) => dispatch({ type: 'RESOLVE_CHOHAN', payload: { proceed } });
+  const startRoulette = () => dispatch({ type: 'START_ROULETTE' });
+  const resolveRoulette = () => dispatch({ type: 'RESOLVE_ROULETTE' });
+  const resolveBombActivation = (activate: boolean) => dispatch({ type: 'RESOLVE_BOMB_ACTIVATION', payload: { activate } });
+  const resolveBullet = (targetId: string | null) => dispatch({ type: 'RESOLVE_BULLET', payload: { targetId } });
+  const startRendaSetting = () => dispatch({ type: 'START_RENDA_SETTING' });
+  const clickRendaSetting = () => dispatch({ type: 'CLICK_RENDA_SETTING' });
+  const tickRendaSetting = () => dispatch({ type: 'TICK_RENDA_SETTING' });
+  const finishRendaSetting = () => dispatch({ type: 'FINISH_RENDA_SETTING' });
+  const startRendaPlay = () => { if (rendaPlayState) dispatch({ type: 'START_RENDA_PLAY_ACTIVATE' }); };
+  const clickRendaPlay = () => dispatch({ type: 'CLICK_RENDA_PLAY' });
+  const tickRendaPlay = () => dispatch({ type: 'TICK_RENDA_PLAY' });
+  const finishRendaPlay = () => dispatch({ type: 'FINISH_RENDA_PLAY' });
+  const resolveMineConfirmation = (proceed: boolean) => dispatch({ type: 'RESOLVE_MINE_CONFIRMATION', payload: { proceed } });
+  const resolveSwapAbility = (answer: string) => dispatch({ type: 'RESOLVE_SWAP_ABILITY', payload: { answer } });
+  const resolveGambleJump = (x: number, y: number) => dispatch({ type: 'RESOLVE_GAMBLE_JUMP', payload: { x, y } });
+  const cancelGambleJump = () => dispatch({ type: 'CANCEL_GAMBLE_JUMP' });
 
+  // ★ 修正：配置中などに相手の駒が見えない不具合を解消しました
   const visiblePieces = pieces;
 
   return {
     phase, pieces: visiblePieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, movablePositions, pendingPromotion, winner,
     chohanState, rouletteState, turnState, turnSkipState, wolfDeclaration, accuseState, WOLF_ROLES, turnCount, mustDropState, pendingBombActivation, bulletMinigameData,
-    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState, ruleSettings, explosions, dispatch, clearExplosions, // ★追加
+    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState, ruleSettings, dispatch, 
     handleCellClick, handleCapturedClick, resolvePromotion, resolveWolfDeclaration, resetGame,
     proceedAccusation, cancelAccusation, resolveAccusation, closeAccusationResult, playChohan, resolveChohan, startRoulette, resolveRoulette, resolveBombActivation, resolveBullet,
     startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation, resolveSwapAbility, resolveGambleJump, cancelGambleJump
