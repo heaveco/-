@@ -29,15 +29,66 @@ export const useGameEngine = (appState: string, roomId: string, myPlayerId: Play
   const {
     phase, pieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, pendingPromotion, winner,
     chohanState, rouletteState, turnState, turnSkipState, wolfDeclaration, accuseState, turnCount, mustDropState, pendingBombActivation, bulletMinigameData,
-    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState, pendingAction, ruleSettings, explosions
+    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState, pendingAction, ruleSettings, explosions,
+    manipulateState, hypnosisState // ▼追加
   } = state;
 
   const selectedBoardPiece = pieces.find(p => p.id === selectedPieceId);
   const selectedCapturedPiece = capturedPieces.find(p => p.id === selectedPieceId);
 
+// 2. movablePositions の計算ロジックに特殊状態を割り込ませる
   let movablePositions: Position[] = [];
   if (phase === 'playing' && !pendingPromotion && !winner && !accuseState && !wolfDeclaration && !pendingBombActivation) {
-    if (swapAbilityState?.step === 'selecting_target') {
+    // ▼ 新規追加：操と洗脳のハイライトロジック
+    if (manipulateState?.step === 'select_target') {
+      const manipulator = pieces.find(p => p.id === manipulateState.pieceId);
+      if (manipulator) {
+        const mArea = getOccupiedPositions(manipulator);
+        pieces.forEach(p => {
+          if (p.id === manipulator.id) return;
+          const pArea = getOccupiedPositions(p);
+          const isAdj = mArea.some(ma => pArea.some(pa => Math.abs(ma.x - pa.x) <= 1 && Math.abs(ma.y - pa.y) <= 1));
+          if (isAdj) pArea.forEach(pa => movablePositions.push(pa));
+        });
+      }
+    } else if (manipulateState?.step === 'select_dest') {
+      const targetPiece = pieces.find(p => p.id === manipulateState.targetPieceId);
+      if (targetPiece) {
+        for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+            if (dx === 0 && dy === 0) continue;
+            const newAnchor = { x: targetPiece.position.x + dx, y: targetPiece.position.y + dy };
+            const shiftedHypo = { ...targetPiece, position: newAnchor };
+            const shiftedArea = getOccupiedPositions(shiftedHypo);
+            const isAllOnBoard = shiftedArea.every(pos => pos.x >= 0 && pos.x <= 4 && pos.y >= 0 && pos.y <= 4);
+            if (isAllOnBoard) {
+               // 移動先が完全に空きマスである場合のみ許可
+               const isOccupiedByOther = pieces.some(p => {
+                 if (p.id === targetPiece.id) return false;
+                 const pArea = getOccupiedPositions(p);
+                 return shiftedArea.some(sa => pArea.some(pa => pa.x === sa.x && pa.y === sa.y));
+               });
+               if (!isOccupiedByOther) movablePositions.push(newAnchor);
+            }
+          }
+        }
+      }
+    } else if (hypnosisState?.step === 'select_target') {
+      const hypnotist = pieces.find(p => p.id === hypnosisState.pieceId);
+      if (hypnotist) {
+        const hArea = getOccupiedPositions(hypnotist);
+        pieces.forEach(p => {
+          // 敵コマであり、かつボス・王以外のコマのみ選択可能にする
+          if (p.owner !== currentPlayer) {
+            const def = getEffectiveDefinition(p);
+            if (def?.tags?.includes('boss_target') || p.definitionId === 'king') return; 
+            const pArea = getOccupiedPositions(p);
+            const isAdj = hArea.some(ha => pArea.some(pa => Math.abs(ha.x - pa.x) <= 1 && Math.abs(ha.y - pa.y) <= 1));
+            if (isAdj) pArea.forEach(pa => movablePositions.push(pa));
+          }
+        });
+      }
+    }else if (swapAbilityState?.step === 'selecting_target') {
       movablePositions = [];
       const isP1 = currentPlayer === 'player1';
       pieces.forEach(p => {
@@ -87,10 +138,13 @@ export const useGameEngine = (appState: string, roomId: string, myPlayerId: Play
     }
   };
 
+// 3. handleCellClick でクリックイベントをインターセプトする
   const handleCellClick = (x: number, y: number) => {
     if (isOnline && myPlayerId !== currentPlayer) return;
-    if (wolfDeclaration || accuseState || pendingPromotion || winner || pendingBombActivation || pendingMineConfirmation || swapAbilityState?.step === 'ask' || swapAbilityState?.step === 'confirm') return;
+    // ▼ モーダル展開中は盤面クリックを弾くよう追加
+    if (wolfDeclaration || accuseState || pendingPromotion || winner || pendingBombActivation || pendingMineConfirmation || swapAbilityState?.step === 'ask' || swapAbilityState?.step === 'confirm' || manipulateState?.step === 'ask' || hypnosisState?.step === 'ask') return;
 
+    // 【1】配置フェーズの処理
     if (phase.startsWith('placement') || phase.startsWith('trap_placement')) {
       const activePlayer = phase.includes('p1') ? 'player1' : 'player2';
       const isTrapPhase = phase.startsWith('trap');
@@ -113,24 +167,52 @@ export const useGameEngine = (appState: string, roomId: string, myPlayerId: Play
       return;
     }
 
-    if (swapAbilityState?.step === 'selecting_target') {
-      const clickedPiece = pieces.find(p => getOccupiedPositions(p).some(pos => pos.x === x && pos.y === y));
-
-    if (!activePiece && clickedPiece && clickedPiece.owner !== currentPlayer && clickedPiece.definitionId === 'wolf') {
-      dispatch({ type: 'SET_ACCUSE_STATE', payload: { targetPieceId: clickedPiece.id, step: 'confirm' } }); 
-      return;
+    // 【2】操・洗脳の能力対象の選択確定・キャンセル処理
+    if (manipulateState?.step === 'select_target') {
+      if (movablePositions.some(m => m.x === x && m.y === y)) {
+        const clickedPiece = pieces.find(p => getOccupiedPositions(p).some(pos => pos.x === x && pos.y === y));
+        if (clickedPiece) {
+          dispatch({ type: 'RESOLVE_MANIPULATE_ABILITY', payload: { answer: 'select_target', targetId: clickedPiece.id } });
+          return;
+        }
+      }
+      // ハイライト外をクリックした場合はキャンセルして処理を下に流す
+      dispatch({ type: 'SET_MANIPULATE_STATE', payload: null });
+    }
+    
+    if (manipulateState?.step === 'select_dest') {
+      if (movablePositions.some(m => m.x === x && m.y === y)) {
+         dispatch({ type: 'RESOLVE_MANIPULATE_ABILITY', payload: { answer: 'select_dest', to: { x, y } } });
+         return;
+      }
+      // ハイライト外をクリックした場合はキャンセル
+      dispatch({ type: 'SET_MANIPULATE_STATE', payload: null });
+    }
+    
+    if (hypnosisState?.step === 'select_target') {
+      if (movablePositions.some(m => m.x === x && m.y === y)) {
+        const clickedPiece = pieces.find(p => getOccupiedPositions(p).some(pos => pos.x === x && pos.y === y));
+        if (clickedPiece) {
+          dispatch({ type: 'RESOLVE_HYPNOSIS_ABILITY', payload: { answer: 'select_target', targetId: clickedPiece.id } });
+          return;
+        }
+      }
+      // ハイライト外をクリックした場合はキャンセル
+      dispatch({ type: 'SET_HYPNOSIS_STATE', payload: null });
     }
 
-    // ★変更：「自分のコマ」または「自分の霊が憑依している敵コマ」であればタップ可能にする
-    const isMyPieceOrMyGhost = clickedPiece && (clickedPiece.owner === currentPlayer || clickedPiece.components?.ghostAttached === currentPlayer);
+    // 【3】白の賢人の能力対象選択・キャンセル処理
+    if (swapAbilityState?.step === 'selecting_target') {
+      const clickedPiece = pieces.find(p => getOccupiedPositions(p).some(pos => pos.x === x && pos.y === y));
+      const isMyPieceOrMyGhost = clickedPiece && (clickedPiece.owner === currentPlayer || clickedPiece.components?.ghostAttached === currentPlayer);
 
-    if (isMyPieceOrMyGhost) {
-      if (mustDropState?.playerId === currentPlayer) return;
-      if (turnState.isSecondMove && clickedPiece.id !== selectedPieceId) return;
-      
-      dispatch({ type: 'SET_SELECTED_PIECE', payload: { pieceId: clickedPiece.id } });
+      if (isMyPieceOrMyGhost) {
+        if (mustDropState?.playerId === currentPlayer) return;
+        if (turnState.isSecondMove && clickedPiece.id !== selectedPieceId) return;
+        
+        dispatch({ type: 'SET_SELECTED_PIECE', payload: { pieceId: clickedPiece.id } });
 
-      const def = getEffectiveDefinition(clickedPiece);
+        const def = getEffectiveDefinition(clickedPiece);
         const w = def?.size?.width || 1; const h = def?.size?.height || 1;
         if (w > 1 || h > 1) return; 
         
@@ -145,19 +227,17 @@ export const useGameEngine = (appState: string, roomId: string, myPlayerId: Play
       }
       return; 
     }
+
+    // 【4】通常の移動・アクション処理
     const activePiece = selectedBoardPiece || selectedCapturedPiece;
-
     let chosenAnchor: Position | null = null;
+    
     if (activePiece) {
-      // ★追加：霊の離脱かどうかを判定
       const isGhostDetachment = !selectedCapturedPiece && activePiece.components?.ghostAttached === currentPlayer;
-
       for (const mPos of movablePositions) {
         if (isGhostDetachment) {
-          // 霊の離脱時は、巨大ホストのサイズを無視して「霊自身(1x1)がそのマスにいるか」で直接判定
           if (mPos.x === x && mPos.y === y) { chosenAnchor = mPos; break; }
         } else {
-          // 通常移動時はホストのサイズで判定
           if (getOccupiedPositions({ ...activePiece, position: mPos }).some(pos => pos.x === x && pos.y === y)) { chosenAnchor = mPos; break; }
         }
       }
@@ -187,6 +267,7 @@ export const useGameEngine = (appState: string, roomId: string, myPlayerId: Play
       return; 
     }
 
+    // 【5】盤面上の駒を選択する処理（および能力モーダルのトリガー）
     const clickedPiece = pieces.find(p => getOccupiedPositions(p).some(pos => pos.x === x && pos.y === y));
 
     if (!activePiece && clickedPiece && clickedPiece.owner !== currentPlayer && clickedPiece.definitionId === 'wolf') {
@@ -203,11 +284,17 @@ export const useGameEngine = (appState: string, roomId: string, myPlayerId: Play
       const def = getEffectiveDefinition(clickedPiece);
       if (def?.id === 'white_sage' && !clickedPiece.components?.isExhausted) {
         dispatch({ type: 'SET_SWAP_ABILITY_STATE', payload: { pieceId: clickedPiece.id, step: 'ask' } });
+      } else if (def?.id === 'manipulator') {  
+        dispatch({ type: 'SET_MANIPULATE_STATE', payload: { pieceId: clickedPiece.id, step: 'ask' } });
+      } else if (def?.id === 'hypnotist') {    
+        dispatch({ type: 'SET_HYPNOSIS_STATE', payload: { pieceId: clickedPiece.id, step: 'ask' } });
       } else if (def?.tags?.includes('gamble_jump')) {
         dispatch({ type: 'SET_PENDING_ACTION', payload: { pieceId: clickedPiece.id, to: { x: 0, y: 0 }, isDrop: false } });
         dispatch({ type: 'SET_PHASE', payload: { phase: 'minigame_gamble_jump' } });
       } else {
         dispatch({ type: 'SET_SWAP_ABILITY_STATE', payload: null });
+        dispatch({ type: 'SET_MANIPULATE_STATE', payload: null }); 
+        dispatch({ type: 'SET_HYPNOSIS_STATE', payload: null });   
       }
     } else {
       if (!turnState.isSecondMove) dispatch({ type: 'SET_SELECTED_PIECE', payload: { pieceId: null } });
@@ -270,12 +357,17 @@ export const useGameEngine = (appState: string, roomId: string, myPlayerId: Play
 
   const visiblePieces = pieces;
 
+  const resolveManipulateAbility = (answer: string, targetId?: string, to?: Position) => dispatch({ type: 'RESOLVE_MANIPULATE_ABILITY', payload: { answer, targetId, to } });
+  const resolveHypnosisAbility = (answer: string, targetId?: string) => dispatch({ type: 'RESOLVE_HYPNOSIS_ABILITY', payload: { answer, targetId } });
+
   return {
     phase, pieces: visiblePieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, movablePositions, pendingPromotion, winner,
     chohanState, rouletteState, turnState, turnSkipState, wolfDeclaration, accuseState, WOLF_ROLES, turnCount, mustDropState, pendingBombActivation, bulletMinigameData,
     rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState, ruleSettings, explosions, dispatch, clearExplosions, 
     handleCellClick, handleCapturedClick, resolvePromotion, resolveWolfDeclaration, resetGame,
     proceedAccusation, cancelAccusation, resolveAccusation, closeAccusationResult, playChohan, resolveChohan, startRoulette, resolveRoulette, resolveBombActivation, resolveBullet,
-    startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation, resolveSwapAbility, resolveGambleJump, cancelGambleJump
+    startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation, resolveSwapAbility, resolveGambleJump, cancelGambleJump,
+    manipulateState, hypnosisState, // ▼追加
+    resolveManipulateAbility, resolveHypnosisAbility// ▼追加
   };
 };

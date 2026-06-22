@@ -27,20 +27,39 @@ export const Board: React.FC<Props> = ({ pieces, selectedPieceId, selectedCaptur
           const pieceOnCellAnchor = pieces.find(p => p.position.x === cell.x && p.position.y === cell.y);
           const isVisible = !(PIECE_DEFINITIONS[pieceOnCellAnchor?.definitionId || '']?.tags?.includes('invisible_to_enemy') && pieceOnCellAnchor?.owner !== currentPlayer);
 
+          // ★修正: 選択中のコマ（黄色ハイライト）の反転対応
           let isSelected = false;
           if (selectedPieceId) {
             const sp = pieces.find(p => p.id === selectedPieceId);
-            if (sp) isSelected = getOccupiedPositions(sp).some(pos => pos.x === cell.x && pos.y === cell.y);
+            if (sp) {
+              const origSp = isFlipped ? { ...sp, position: { x: 4 - sp.position.x, y: 4 - sp.position.y } } : sp;
+              const origOccupied = getOccupiedPositions(origSp);
+              isSelected = origOccupied.some(origPos => {
+                const dispPos = isFlipped ? { x: 4 - origPos.x, y: 4 - origPos.y } : origPos;
+                return dispPos.x === cell.x && dispPos.y === cell.y;
+              });
+            }
           }
 
+          // ★修正: 移動可能マス（緑色ハイライト）の反転対応
           let isMovable = false;
           if (activePiece) {
-            // ★修正：霊の離脱時は、ホストのサイズではなく 1x1 の単一座標として緑マスを判定する
             const isGhostDetachment = !selectedCapturedPiece && activePiece.components?.ghostAttached === currentPlayer;
             if (isGhostDetachment) {
                isMovable = movablePositions.some(mPos => mPos.x === cell.x && mPos.y === cell.y);
             } else {
-               isMovable = movablePositions.some(mPos => getOccupiedPositions({ ...activePiece, position: mPos }).some(pos => pos.x === cell.x && pos.y === cell.y));
+               isMovable = movablePositions.some(mPos => {
+                 // アンカーを一度反転前の座標に戻す
+                 const origMPos = isFlipped ? { x: 4 - mPos.x, y: 4 - mPos.y } : mPos;
+                 // 反転前の座標で、本来の占有マス（2マス等）を計算する
+                 const origOccupied = getOccupiedPositions({ ...activePiece, position: origMPos });
+                 
+                 // 計算結果の各マスを反転後の座標に変換し、現在のセルと一致するか判定する
+                 return origOccupied.some(origPos => {
+                   const dispPos = isFlipped ? { x: 4 - origPos.x, y: 4 - origPos.y } : origPos;
+                   return dispPos.x === cell.x && dispPos.y === cell.y;
+                 });
+               });
             }
           }
 

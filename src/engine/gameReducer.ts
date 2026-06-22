@@ -12,7 +12,7 @@ const INITIAL_KINGS: Piece[] = [
   { id: 'p2_king', definitionId: 'king', owner: 'player2', position: { x: 2, y: 0 }, components: {} },
 ];
 
-const PIECE_POOL = ['pawn', 'silver', 'gold', 'lance', 'rook', 'bishop', 'knight', 'troll', 'trickster', 'wolf', 'hero', 'nuisance', 'bomb', 'landmine', 'bullet', 'drunk', 'renda', 'twins', 'twin_assassin', 'white_sage', 'mushroom', 'shield', 'ghost', 'gamble_jumper', 'anti_promote']; 
+const PIECE_POOL = ['pawn', 'silver', 'gold', 'lance', 'rook', 'bishop', 'knight', 'troll', 'trickster', 'wolf', 'hero', 'nuisance', 'bomb', 'landmine', 'bullet', 'drunk', 'renda', 'twins', 'twin_assassin', 'white_sage', 'mushroom', 'shield', 'ghost', 'gamble_jumper', 'anti_promote', 'manipulator', 'hypnotist'];
 const DEMOTE_MAP: Record<string, string> = { 'tokin': 'pawn', 'promoted_silver': 'silver', 'promoted_lance': 'lance', 'promoted_rook': 'rook', 'promoted_bishop': 'bishop', 'promoted_knight': 'knight', 'promoted_trickster': 'trickster', 'promoted_drunk': 'drunk' , 'promoted_anti_promote': 'anti_promote', 'activated_bomb': 'bomb' };
 
 const resolveNextPlacementPhase = (np1: string[], np2: string[], nt1: string[], nt2: string[], board: Piece[], cap: Piece[]) => {
@@ -63,7 +63,9 @@ export const getInitialGameState = (): GameState => {
     turnState: { hasDoubledUp: false, isSecondMove: false }, turnSkipState: { player1: false, player2: false },
     pendingAction: null, chohanState: null, rouletteState: null, wolfDeclaration: null, accuseState: null, swapAbilityState: null,
     ruleSettings: { useTurnTimer: false },
-    explosions: [] // ★追加
+    explosions: [], // ★追加
+    manipulateState: null, // ▼追加
+    hypnosisState: null    // ▼追加
   };
 };
 
@@ -544,6 +546,8 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
       nextState.bulletMinigameData = null;
       nextState.rendaSettingState = null;
       nextState.rendaPlayState = null;
+      nextState.manipulateState = null; // ▼追加
+      nextState.hypnosisState = null;   // ▼追加
       nextState.phase = 'playing';
       return nextState;
     }
@@ -840,6 +844,57 @@ export const gameReducer = (state: GameState, action: GameAction): GameState => 
     case 'SET_ACCUSE_STATE': return { ...state, accuseState: action.payload };
     case 'SET_CHOHAN_STATE': return { ...state, chohanState: action.payload };
     case 'SET_SWAP_ABILITY_STATE': return { ...state, swapAbilityState: action.payload };
+case 'SET_MANIPULATE_STATE': return { ...state, manipulateState: action.payload };
+    case 'SET_HYPNOSIS_STATE': return { ...state, hypnosisState: action.payload };
+    
+    case 'RESOLVE_MANIPULATE_ABILITY': {
+      const { answer, targetId, to } = action.payload;
+      let nextState = { ...state };
+      if (!nextState.manipulateState) return state;
+
+      if (nextState.manipulateState.step === 'ask') {
+        if (answer === 'yes') nextState.manipulateState = { ...nextState.manipulateState, step: 'select_target' };
+        else nextState.manipulateState = null;
+      } else if (nextState.manipulateState.step === 'select_target' && targetId) {
+        nextState.manipulateState = { ...nextState.manipulateState, step: 'select_dest', targetPieceId: targetId };
+      } else if (nextState.manipulateState.step === 'select_dest' && to) {
+        const tId = nextState.manipulateState.targetPieceId;
+        // 対象のコマを空き地に移動させる
+        nextState.pieces = nextState.pieces.map(p => p.id === tId ? { ...p, position: to } : p);
+        nextState = endCurrentTurn(nextState, nextState.pieces);
+        nextState.selectedPieceId = null;
+        nextState.manipulateState = null;
+      }
+      return nextState;
+    }
+
+    case 'RESOLVE_HYPNOSIS_ABILITY': {
+      const { answer, targetId } = action.payload;
+      let nextState = { ...state };
+      if (!nextState.hypnosisState) return state;
+
+      if (nextState.hypnosisState.step === 'ask') {
+        if (answer === 'yes') nextState.hypnosisState = { ...nextState.hypnosisState, step: 'select_target' };
+        else nextState.hypnosisState = null;
+      } else if (nextState.hypnosisState.step === 'select_target' && targetId) {
+        const hId = nextState.hypnosisState.pieceId;
+        // 自身（洗脳者）を盤面から消去
+        nextState.pieces = nextState.pieces.filter(p => p.id !== hId);
+        // 対象の所有者を自分に変更する（originalOwnerを記録して勝利判定を正しく維持）
+        nextState.pieces = nextState.pieces.map(p => 
+          p.id === targetId ? { ...p, owner: nextState.currentPlayer, components: { ...p.components, originalOwner: p.owner } } : p
+        );
+
+        // ※洗脳によって王将などを奪った場合の勝利判定チェック
+        const victoryResult = evaluateVictoryConditions(nextState.pieces, nextState.currentPlayer);
+        if (victoryResult) { nextState.selectedPieceId = null; nextState.winner = victoryResult; return nextState; }
+
+        nextState = endCurrentTurn(nextState, nextState.pieces);
+        nextState.selectedPieceId = null;
+        nextState.hypnosisState = null;
+      }
+      return nextState;
+    }
     default: return state;
   }
 };

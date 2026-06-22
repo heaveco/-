@@ -31,6 +31,9 @@ export interface GameState {
   swapAbilityState: { pieceId: string; step: 'ask' | 'selecting_target' | 'confirm'; targetPieceId?: string } | null;
   ruleSettings?: { useTurnTimer: boolean };
   explosions?: Position[]; // ★新規追加：爆発エフェクトの座標リスト
+  // ▼ 新規追加：操と洗脳の状態管理
+  manipulateState: { pieceId: string; step: 'ask' | 'select_target' | 'select_dest'; targetPieceId?: string } | null;
+  hypnosisState: { pieceId: string; step: 'ask' | 'select_target' } | null;
 }
 
 export type GameAction = 
@@ -72,4 +75,9 @@ export type GameAction =
   | { type: 'START_BULLET_MINIGAME'; payload: { pieceId: string } }
   | { type: 'RESIGN'; payload: { playerId: PlayerId } }
   | { type: 'SKIP_TURN'; payload: { playerId: PlayerId } }
-  | { type: 'CLEAR_EXPLOSIONS' }; // ★新規追加：エフェクト消去
+  | { type: 'CLEAR_EXPLOSIONS' } // ★新規追加：エフェクト消去
+  // ▼ 新規追加：操と洗脳のアクション
+  | { type: 'SET_MANIPULATE_STATE'; payload: any | null }
+  | { type: 'SET_HYPNOSIS_STATE'; payload: any | null }
+  | { type: 'RESOLVE_MANIPULATE_ABILITY'; payload: { answer: string; targetId?: string; to?: Position } }
+  | { type: 'RESOLVE_HYPNOSIS_ABILITY'; payload: { answer: string; targetId?: string } };

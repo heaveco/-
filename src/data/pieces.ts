@@ -111,5 +111,20 @@ export const PIECE_DEFINITIONS: Record<string, PieceDefinition> = {
   },
   promoted_anti_promote: { 
     id: 'promoted_anti_promote', name: '×', tags: ['exhausted'], moveRules: [] 
+  },
+  // ▼ 新規追加：「操」と「洗脳」
+  manipulator: {
+    id: 'manipulator',
+    name: '操',
+    tags: ['manipulator_ability'],
+    // 通常は周囲8方向に1マス移動可能
+    moveRules: [{ generator: 'relative', params: [{ dx: -1, dy: -1 }, { dx: 0, dy: -1 }, { dx: 1, dy: -1 }, { dx: -1, dy: 0 }, { dx: 1, dy: 0 }, { dx: -1, dy: 1 }, { dx: 0, dy: 1 }, { dx: 1, dy: 1 }] }]
+  },
+  hypnotist: {
+    id: 'hypnotist',
+    name: '洗脳',
+    tags: ['hypnosis_ability'],
+    // 通常は前と斜め前の3方向に1マス移動可能
+    moveRules: [{ generator: 'relative', params: [{ dx: -1, dy: -1 }, { dx: 0, dy: -1 }, { dx: 1, dy: -1 }] }]
   }
 };

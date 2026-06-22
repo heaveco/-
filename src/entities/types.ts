@@ -30,6 +30,9 @@ export interface GameState {
   wolfDeclaration: any | null;
   accuseState: any | null;
   swapAbilityState: { pieceId: string; step: 'ask' | 'selecting_target' | 'confirm'; targetPieceId?: string } | null;
+// ▼ 新規追加：操と洗脳の状態管理
+  manipulateState: { pieceId: string; step: 'ask' | 'select_target' | 'select_dest'; targetPieceId?: string } | null;
+  hypnosisState: { pieceId: string; step: 'ask' | 'select_target' } | null;
 }
 
 export type GameAction = 
@@ -71,4 +74,9 @@ export type GameAction =
   | { type: 'SET_SWAP_ABILITY_STATE'; payload: any | null }
   | { type: 'START_BULLET_MINIGAME'; payload: { pieceId: string } }
   // ★新規追加：投了アクション
-  | { type: 'RESIGN'; payload: { playerId: PlayerId } };
+  | { type: 'RESIGN'; payload: { playerId: PlayerId } }
+  // ▼ 新規追加：操と洗脳のアクション
+  | { type: 'SET_MANIPULATE_STATE'; payload: any | null }
+  | { type: 'SET_HYPNOSIS_STATE'; payload: any | null }
+  | { type: 'RESOLVE_MANIPULATE_ABILITY'; payload: { answer: string; targetId?: string; to?: Position } }
+  | { type: 'RESOLVE_HYPNOSIS_ABILITY'; payload: { answer: string; targetId?: string } };

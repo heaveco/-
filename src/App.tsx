@@ -34,13 +34,15 @@ function App() {
   const [placementTimer, setPlacementTimer] = useState<number | null>(null);
   const [turnTimer, setTurnTimer] = useState<number | null>(null); 
 
-  const { 
+const { 
     phase, pieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, movablePositions, pendingPromotion, winner, resetGame,
     chohanState, rouletteState, turnState, turnSkipState, wolfDeclaration, accuseState, turnCount, mustDropState, pendingBombActivation, bulletMinigameData,
     rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState, ruleSettings, explosions, dispatch, clearExplosions,
     handleCellClick, handleCapturedClick, resolvePromotion, resolveWolfDeclaration, proceedAccusation, cancelAccusation, resolveAccusation, closeAccusationResult, 
     playChohan, resolveChohan, startRoulette, resolveRoulette, resolveBombActivation, resolveBullet,
-    startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation, resolveSwapAbility, resolveGambleJump, cancelGambleJump
+    startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation, resolveSwapAbility, resolveGambleJump, cancelGambleJump,
+    manipulateState, hypnosisState, // ⬅ 追加
+    resolveManipulateAbility, resolveHypnosisAbility // ⬅ 追加
   } = useGameEngine(appState, activeRoomId, myPlayerId);
 
   const isMyTurn = appState === 'local' || currentPlayer === myPlayerId;
@@ -393,7 +395,7 @@ if (appState === 'menu') {
     );
   }
 
-  let statusText = '';
+let statusText = '';
   if (winner) statusText = 'ゲーム終了！';
   else if (phase === 'placement_p1') statusText = '【配置】Player 1 (青) : 一番手前の列に駒を置いてください';
   else if (phase === 'placement_p2') statusText = '【配置】Player 2 (赤) : 一番奥の列に駒を置いてください';
@@ -402,6 +404,11 @@ if (appState === 'menu') {
   else if (phase === 'renda_quota_p1') statusText = '【連打妨害】Player 1 (青) : 相手の連打ノルマを決めてください！';
   else if (phase === 'renda_quota_p2') statusText = '【連打妨害】Player 2 (赤) : 相手の連打ノルマを決めてください！';
   else if (swapAbilityState?.step === 'selecting_target') statusText = '【能力】入れ替える自陣の駒を選択してください';
+  // ▼ ここから追加
+  else if (manipulateState?.step === 'select_target') statusText = '【能力】操る対象のコマ（周囲1マス）を選択してください';
+  else if (manipulateState?.step === 'select_dest') statusText = '【能力】対象の移動先（空きマス）を選択してください';
+  else if (hypnosisState?.step === 'select_target') statusText = '【能力】洗脳する敵のコマ（周囲1マス）を選択してください';
+  // ▲ ここまで追加
   else statusText = `Turn ${turnCount}: ${currentPlayer === 'player1' ? 'Player 1 (青)' : 'Player 2 (赤)'}`;
 
   const p1Cap = capturedPieces.filter(p => p.owner === 'player1');
@@ -869,6 +876,37 @@ if (appState === 'menu') {
                 <button onClick={() => resolvePromotion(true)} className="px-6 py-2 bg-blue-600 mr-4">はい</button>
                 <button onClick={() => resolvePromotion(false)} className="px-6 py-2 bg-gray-600">いいえ</button>
               </>
+            )}
+          </div>
+        </div>
+      )}
+      {/* ▼ 操の能力確認モーダル */}
+      {manipulateState?.step === 'ask' && (
+        <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
+          <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-2 border-emerald-500 max-w-md w-full">
+            <h2 className="text-3xl font-bold mb-4 text-emerald-400">操</h2>
+            <p className="mb-6 text-gray-300 text-lg">隣接するコマを1マス離れた空き地に移動させる能力を使いますか？</p>
+            {!isMyTurn ? <WaitingForOpponent title="相手のターン" actionName="能力の使用を選択" /> : (
+              <div className="flex gap-4 justify-center">
+                <button onClick={() => resolveManipulateAbility('yes')} className="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 rounded font-bold text-lg">はい（能力を使う）</button>
+                <button onClick={() => resolveManipulateAbility('no')} className="px-6 py-3 bg-gray-600 hover:bg-gray-500 rounded font-bold text-lg">いいえ（通常移動）</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ▼ 洗脳の能力確認モーダル */}
+      {hypnosisState?.step === 'ask' && (
+        <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50">
+          <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center border-2 border-pink-500 max-w-md w-full">
+            <h2 className="text-3xl font-bold mb-4 text-pink-400">洗脳</h2>
+            <p className="mb-6 text-gray-300 text-lg">自身を犠牲にして、隣接する敵コマ1体をその場のまま味方にしますか？<br/><span className="text-sm text-gray-400">※王やボス駒には効きません</span></p>
+            {!isMyTurn ? <WaitingForOpponent title="相手のターン" actionName="能力の使用を選択" /> : (
+              <div className="flex gap-4 justify-center">
+                <button onClick={() => resolveHypnosisAbility('yes')} className="px-6 py-3 bg-pink-600 hover:bg-pink-500 rounded font-bold text-lg">はい（自己犠牲）</button>
+                <button onClick={() => resolveHypnosisAbility('no')} className="px-6 py-3 bg-gray-600 hover:bg-gray-500 rounded font-bold text-lg">いいえ（通常移動）</button>
+              </div>
             )}
           </div>
         </div>
