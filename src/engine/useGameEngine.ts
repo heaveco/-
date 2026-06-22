@@ -29,7 +29,7 @@ export const useGameEngine = (appState: string, roomId: string, myPlayerId: Play
   const {
     phase, pieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, pendingPromotion, winner,
     chohanState, rouletteState, turnState, turnSkipState, wolfDeclaration, accuseState, turnCount, mustDropState, pendingBombActivation, bulletMinigameData,
-    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState, pendingAction, ruleSettings
+    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState, pendingAction, ruleSettings, explosions
   } = state;
 
   const selectedBoardPiece = pieces.find(p => p.id === selectedPieceId);
@@ -53,7 +53,6 @@ export const useGameEngine = (appState: string, roomId: string, myPlayerId: Play
     } else if (selectedBoardPiece) {
       movablePositions = calculateMovablePositions(selectedBoardPiece, pieces, turnCount);
 
-      // ★ 新規追加：成る前のトリックスターは、縦方向の移動（Y座標の差が4のワープ）を禁止する
       if (selectedBoardPiece.definitionId === 'trickster') {
         movablePositions = movablePositions.filter(pos => Math.abs(pos.y - selectedBoardPiece.position.y) !== 4);
       }
@@ -216,6 +215,9 @@ export const useGameEngine = (appState: string, roomId: string, myPlayerId: Play
     }
   };
 
+  // ============================================================================
+  // ★ 消えてしまっていたアクション関数群を復元しました！
+  // ============================================================================
   const resolvePromotion = (doPromote: boolean) => dispatch({ type: 'RESOLVE_PROMOTION', payload: { doPromote } });
   const resolveWolfDeclaration = (roleId: string) => dispatch({ type: 'RESOLVE_WOLF_DECLARATION', payload: { roleId } });
   const resetGame = () => dispatch({ type: 'SYSTEM_RESET_GAME' });
@@ -241,14 +243,15 @@ export const useGameEngine = (appState: string, roomId: string, myPlayerId: Play
   const resolveSwapAbility = (answer: string) => dispatch({ type: 'RESOLVE_SWAP_ABILITY', payload: { answer } });
   const resolveGambleJump = (x: number, y: number) => dispatch({ type: 'RESOLVE_GAMBLE_JUMP', payload: { x, y } });
   const cancelGambleJump = () => dispatch({ type: 'CANCEL_GAMBLE_JUMP' });
+  
+  const clearExplosions = () => dispatch({ type: 'CLEAR_EXPLOSIONS' });
 
-  // ★ 修正：配置中などに相手の駒が見えない不具合を解消しました
   const visiblePieces = pieces;
 
   return {
     phase, pieces: visiblePieces, capturedPieces, p1Queue, p2Queue, p1TrapQueue, p2TrapQueue, currentPlayer, selectedPieceId, movablePositions, pendingPromotion, winner,
     chohanState, rouletteState, turnState, turnSkipState, wolfDeclaration, accuseState, WOLF_ROLES, turnCount, mustDropState, pendingBombActivation, bulletMinigameData,
-    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState, ruleSettings, dispatch, 
+    rendaQuotas, rendaSettingState, rendaPlayState, pendingMineConfirmation, swapAbilityState, ruleSettings, explosions, dispatch, clearExplosions, 
     handleCellClick, handleCapturedClick, resolvePromotion, resolveWolfDeclaration, resetGame,
     proceedAccusation, cancelAccusation, resolveAccusation, closeAccusationResult, playChohan, resolveChohan, startRoulette, resolveRoulette, resolveBombActivation, resolveBullet,
     startRendaSetting, clickRendaSetting, tickRendaSetting, finishRendaSetting, startRendaPlay, clickRendaPlay, tickRendaPlay, finishRendaPlay, resolveMineConfirmation, resolveSwapAbility, resolveGambleJump, cancelGambleJump
