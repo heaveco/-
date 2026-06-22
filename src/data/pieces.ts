@@ -62,7 +62,7 @@ export const PIECE_DEFINITIONS: Record<string, PieceDefinition> = {
     defaultComponents: { hp: 2 },
     // 2マスの幅を持つため、左側から見て「左斜め前」「後ろ」、右側から見て「右斜め前」「後ろ」への相対座標を定義
     moveRules: [
-      { generator: 'relative', params: [{ dx: -1, dy: -1 }, { dx: 1, dy: -1 }, { dx: 0, dy: 1 }, { dx: 0, dy: 1 }] }
+      { generator: 'relative', params: [{ dx: -1, dy: -1 }, { dx: 1, dy: -1 }, { dx: 0, dy: 1 }] }
     ]
   },
   twin_assassin: {
@@ -72,7 +72,7 @@ export const PIECE_DEFINITIONS: Record<string, PieceDefinition> = {
     tags: ['start_in_hand', 'split_on_hit'], // 被弾時に分裂する専用タグ
     // 左斜め前・右斜め前・後ろに移動可能
     moveRules: [
-      { generator: 'relative', params: [{ dx: -1, dy: -1 }, { dx: 1, dy: -1 }, { dx: 0, dy: 1 }, { dx: 0, dy: 1 }] }
+      { generator: 'relative', params: [{ dx: -1, dy: -1 }, { dx: 1, dy: -1 }, { dx: 0, dy: 1 }] }
     ]
   },
   loser: { id: 'loser', name: '片割れ', moveRules: [{ generator: 'relative', params: [{ dx: -1, dy: -1 }, { dx: 0, dy: -1 }, { dx: 1, dy: -1 }, { dx: -1, dy: 0 }, { dx: 1, dy: 0 }, { dx: 0, dy: 1 }] }] },

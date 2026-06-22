@@ -163,7 +163,7 @@ export const calculateMovablePositions = (piece: Piece, board: Piece[], turnCoun
       const allyCount = overlappingPieces.filter(p => p.owner === piece.owner).length;
       const enemyCount = overlappingPieces.filter(p => p.owner !== piece.owner).length;
       if (allyCount > 0) return false;
-      if (enemyCount >= 2) return false;
+      //if (enemyCount >= 2) return false;
       return true;
     }
 

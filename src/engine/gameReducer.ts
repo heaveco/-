@@ -338,29 +338,54 @@ const executeMove = (state: GameState, payload: { pieceId: string, to: Position,
     nextPieces = nextPieces.map(p => p.id === activePiece.id ? { ...p, position: finalTo } : p);
     lastActionData = { type: 'move' };
   } else {
-    let targetPiece = undefined;
-    for (const p of nextPieces) {
-      if (p.id === activePiece.id) continue; 
-      if (p.owner !== nextState.currentPlayer || activePiece.definitionId === 'gamble_jumper') {
-        const targetArea = getOccupiedPositions(p);
-        const myDestArea = getOccupiedPositions({ ...activePiece, position: finalTo });
-        if (myDestArea.some(dp => targetArea.some(tp => tp.x === dp.x && tp.y === dp.y))) { targetPiece = p; break; }
-      }
+    // 1. 変数を配列として定義し、breakを消してすべて収集する
+let targetPieces: Piece[] = [];
+for (const p of nextPieces) {
+  if (p.id === activePiece.id) continue; 
+  if (p.owner !== nextState.currentPlayer || activePiece.definitionId === 'gamble_jumper') {
+    const targetArea = getOccupiedPositions(p);
+    const myDestArea = getOccupiedPositions({ ...activePiece, position: finalTo });
+    if (myDestArea.some(dp => targetArea.some(tp => tp.x === dp.x && tp.y === dp.y))) { 
+      targetPieces.push(p); // ★ breakせずに全て配列に詰める
     }
-    if (targetPiece) {
-      const combatResult = resolveCombat(activePiece, targetPiece, finalTo, nextPieces);
-      if (combatResult.capturedPiece) {
-        const capDef = combatResult.capturedPiece.definitionId;
-        const originalDefId = DEMOTE_MAP[capDef] || capDef;
-        const newCapId = `cap_${Date.now()}_${Math.random()}`;
-        nextCaptured.push({ ...combatResult.capturedPiece!, owner: combatResult.capturedPiece.owner, definitionId: originalDefId, id: newCapId });
-        if (PIECE_DEFINITIONS[capDef]?.tags?.includes('force_drop_if_captured')) {
-          nextState.mustDropState = { playerId: nextState.currentPlayer, pieceId: newCapId }; skipTurnChange = false; 
-        }
+  }
+}
+
+// 2. ターゲットが1体以上見つかった場合の戦闘処理
+if (targetPieces.length > 0) {
+  // isDrop側の場合はここで nextCaptured = nextCaptured.filter(...) を行います
+
+  const combatResult = resolveCombat(activePiece, targetPieces, finalTo, nextPieces);
+  
+  // ★ combat.tsで追加された「2体同時取得不可でnullが返る」場合のガード節
+  if (!combatResult) {
+    return state; // 取得不可能な組み合わせなら、移動をキャンセルして元の状態を返す
+  }
+
+  // ★ 配列になった capturedPieces をループで回して処理する
+  if (combatResult.capturedPieces && combatResult.capturedPieces.length > 0) {
+    combatResult.capturedPieces.forEach(capturedPiece => {
+      const capDef = capturedPiece.definitionId;
+      const originalDefId = DEMOTE_MAP[capDef] || capDef;
+      const newCapId = `cap_${Date.now()}_${Math.random()}`;
+      
+      nextCaptured.push({ 
+        ...capturedPiece, 
+        owner: capturedPiece.owner, 
+        definitionId: originalDefId, 
+        id: newCapId 
+      });
+      
+      if (PIECE_DEFINITIONS[capDef]?.tags?.includes('force_drop_if_captured')) {
+        nextState.mustDropState = { playerId: nextState.currentPlayer, pieceId: newCapId }; 
+        skipTurnChange = false; 
       }
-      nextPieces = combatResult.nextBoard;
-      promotionCanceled = combatResult.promotionCanceled;
-    } else {
+    });
+  }
+  
+  nextPieces = combatResult.nextBoard;
+  promotionCanceled = combatResult.promotionCanceled;
+} else {
       nextPieces = nextPieces.map(p => p.id === activePiece.id ? { ...p, position: finalTo, components: { ...p.components, useCount: newUseCount ?? p.components.useCount } } : p);
     }
     lastActionData = { type: 'move' };
